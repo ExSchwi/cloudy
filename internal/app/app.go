@@ -255,9 +255,10 @@ type app struct {
 	savedSession string // the session as last kept
 	sessionDue   bool   // a save of the session is due
 
-	style      styleState    // the day's songs in the styles picked
-	radar      radarState    // NetEase's radars on the home page
-	progressAt progressShown // what the taskbar button last showed of the song
+	style         styleState // the day's songs in the styles picked
+	radar         radarState // NetEase's radars on the home page
+	lyricDownload lyricDownloadState
+	progressAt    progressShown // what the taskbar button last showed of the song
 }
 
 // post runs fn on the main thread and redraws both windows. Without a

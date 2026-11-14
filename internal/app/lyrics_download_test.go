@@ -1,0 +1,217 @@
+package app
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+
+	"netease-music-mygo/internal/download"
+	"netease-music-mygo/internal/lyrics"
+	"netease-music-mygo/internal/netease"
+)
+
+// Lyrics retain Unicode, translations and real timing in all three export formats.
+func TestLyricsFileText(t *testing.T) {
+	lines := []lyrics.Line{
+		{At: 12500 * time.Millisecond, End: 20 * time.Second, Text: " 第一行🎵 ", Translation: " First line "},
+		{At: 15 * time.Second, Text: "第二行"},
+	}
+	for _, tc := range []struct{ format, want string }{
+		{"txt", "第一行🎵\r\nFirst line\r\n第二行\r\n"},
+		{"lrc", "[00:12.500]第一行🎵\r\n[00:12.500]First line\r\n[00:15.000]第二行\r\n"},
+		{"srt", "1\r\n00:00:12,500 --> 00:00:15,000\r\n第一行🎵\r\nFirst line\r\n\r\n2\r\n00:00:15,000 --> 00:00:18,000\r\n第二行\r\n\r\n"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			got, err := lyricsFileText(lines, tc.format, 18*time.Second)
+			if err != nil || got != tc.want {
+				t.Fatalf("export = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// SRT merges simultaneous lines and keeps an hour-long song's final cue valid.
+func TestLyricsSubtitleTimes(t *testing.T) {
+	lines := []lyrics.Line{
+		{At: time.Hour, Text: "first"},
+		{At: time.Hour, Text: "second", Translation: "translation"},
+		{At: time.Hour + 2*time.Second, End: time.Hour + 3*time.Second, Text: "last"},
+	}
+	got, err := lyricsFileText(lines, "srt", 0)
+	want := "1\r\n01:00:00,000 --> 01:00:02,000\r\nfirst\r\nsecond\r\ntranslation\r\n\r\n2\r\n01:00:02,000 --> 01:00:03,000\r\nlast\r\n\r\n"
+	if err != nil || got != want {
+		t.Fatalf("subtitle = %q, %v", got, err)
+	}
+	got, err = lyricsFileText(lines[:1], "lrc", 0)
+	if err != nil || got != "[60:00.000]first\r\n" {
+		t.Fatalf("long LRC = %q, %v", got, err)
+	}
+}
+
+// Plain lyrics can be exported as text, but must never be given fabricated timing.
+func TestPlainLyricsExport(t *testing.T) {
+	lines := lyrics.FromText("plain lyrics\nsecond line")
+	if text, err := lyricsFileText(lines, "txt", 0); err != nil || text != "plain lyrics\r\nsecond line\r\n" {
+		t.Fatalf("plain text = %q, %v", text, err)
+	}
+	for _, format := range []string{"lrc", "srt"} {
+		if _, err := lyricsFileText(lines, format, 0); err == nil {
+			t.Fatalf("plain lyrics exported as timed %s", format)
+		}
+	}
+	for _, lines := range [][]lyrics.Line{nil, {{Text: " "}}} {
+		if _, err := lyricsFileText(lines, "txt", 0); err == nil {
+			t.Fatal("empty lyrics exported")
+		}
+	}
+}
+
+// Switching songs or replacing the playback cache cannot change an export already requested.
+func TestLyricDownloadSnapshotsSong(t *testing.T) {
+	a := newTestApp()
+	a.settings.DownloadFolder = t.TempDir()
+	song := netease.Track{ID: 7, Name: "original", Duration: 10000}
+	a.pl.Cue([]netease.Track{song})
+	lines := lyrics.Build("[00:01.25]original lyrics", "", "")
+	a.pl.SetLyrics(lines)
+	r := a.lyricDownloadRequest(song, "lrc")
+	lines[0].Text = "changed cache"
+	a.pl.Cue([]netease.Track{{ID: 8, Name: "new song"}})
+	a.pl.SetLyrics(lyrics.Build("[00:02]wrong lyrics", "", ""))
+	old := chooseLyricPath
+	defer func() { chooseLyricPath = old }()
+	chooseLyricPath = func(opts mygo.SaveDialogOptions) (string, error) {
+		if !strings.Contains(opts.DefaultPath, "original.lrc") {
+			t.Errorf("filename changed to %q", opts.DefaultPath)
+		}
+		return opts.DefaultPath, nil
+	}
+	path, err := r.save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "[00:01.250]original lyrics\r\n" {
+		t.Fatalf("saved lyrics = %q, %v", b, err)
+	}
+}
+
+// Local sidecars work offline; an error, a missing lyric or cancelling never creates an export.
+func TestLyricDownloadOfflineAndCancel(t *testing.T) {
+	dir := t.TempDir()
+	song := netease.Track{ID: 7, LocalPath: filepath.Join(dir, "song.mp3")}
+	if err := os.WriteFile(download.LyricsPath(song.LocalPath), []byte("[00:02]offline"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldFetch, oldChoose := downloadLyricsOf, chooseLyricPath
+	defer func() { downloadLyricsOf, chooseLyricPath = oldFetch, oldChoose }()
+	downloadLyricsOf = func(int64) (string, string, string, error) { return "", "", "", errors.New("offline") }
+	called := 0
+	chooseLyricPath = func(opts mygo.SaveDialogOptions) (string, error) { called++; return "", nil }
+	r := lyricDownloadRequest{song: song, format: "txt", folder: dir}
+	if path, err := r.save(); path != "" || err != nil || called != 1 {
+		t.Fatalf("cancel = %q, %v, calls %d", path, err, called)
+	}
+	files, err := os.ReadDir(dir)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("cancelling changed directory: %v, %v", files, err)
+	}
+	r.song.LocalPath = ""
+	if _, err := r.save(); err == nil || called != 1 {
+		t.Fatal("network failure opened the save dialog")
+	}
+	downloadLyricsOf = func(int64) (string, string, string, error) { return "", "", "", nil }
+	if _, err := r.save(); err == nil || called != 1 {
+		t.Fatal("missing lyrics opened the save dialog")
+	}
+}
+
+// A filename's extension must match its content, and appending one cannot bypass overwrite confirmation.
+func TestLyricDownloadFileSafety(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "song.lrc")
+	if err := os.WriteFile(path, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := lyricDownloadRequest{format: "lrc", loaded: true, lines: lyrics.Build("[00:01]new", "", "")}
+	old := chooseLyricPath
+	defer func() { chooseLyricPath = old }()
+	for _, selected := range []string{strings.TrimSuffix(path, ".lrc"), filepath.Join(dir, "wrong.txt"), filepath.Join(dir, "folder.lrc")} {
+		chooseLyricPath = func(mygo.SaveDialogOptions) (string, error) { return selected, nil }
+		if selected == filepath.Join(dir, "folder.lrc") {
+			if err := os.Mkdir(selected, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := r.save(); err == nil {
+			t.Fatalf("unsafe path %q accepted", selected)
+		}
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "keep" {
+		t.Fatalf("unconfirmed overwrite: %q, %v", b, err)
+	}
+}
+
+// Both three-dot menus open the same options; the toggle and format picker control the saved extension.
+func TestLyricDownloadMenuOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name, button, format   string
+		nowPlaying, timestamps bool
+	}{
+		{"bar text", "歌曲详情", "txt", false, false},
+		{"playing lrc", "更多", "lrc", true, true},
+		{"bar srt", "歌曲详情", "srt", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp()
+			a.settings = defaultSettings()
+			a.settings.DownloadFolder = t.TempDir()
+			a.dl.loaded = true
+			a.pl.Cue([]netease.Track{{ID: 7, Name: "song", Duration: 10000}})
+			a.pl.SetLyrics(lyrics.Build("[00:01]lyrics", "", ""))
+			a.nowPlaying = tc.nowPlaying
+			tt := ui.NewTester(a.view, 1180, 800)
+			tt.SetScale(0.3)
+			tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+			tt.Advance(time.Second)
+			tt.Frame()
+			if err := chooseItem(tt, tc.button, "下载歌词"); err != nil {
+				t.Fatal(err)
+			}
+			if !a.lyricDownload.open || a.lyricDownload.song.ID != 7 {
+				t.Fatal("lyrics options did not open for this song")
+			}
+			if !tc.timestamps {
+				if err := tt.Click("切换歌词时间戳"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.format == "srt" {
+				if err := chooseItem(tt, "歌词文件格式", "SRT"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			old := chooseLyricPath
+			defer func() { chooseLyricPath = old }()
+			chosen := make(chan mygo.SaveDialogOptions, 1)
+			chooseLyricPath = func(opts mygo.SaveDialogOptions) (string, error) { chosen <- opts; return "", nil }
+			if err := tt.Click("选择保存位置"); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case opts := <-chosen:
+				if filepath.Ext(opts.DefaultPath) != "."+tc.format {
+					t.Fatalf("saved extension = %s", opts.DefaultPath)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("save action did not reach the file dialog")
+			}
+		})
+	}
+}

@@ -54,7 +54,7 @@ func (a *app) songActions(tr *netease.Track, pid int64) [][]menuAction {
 			{label: "复制文件路径", icon: iconCopy, do: func() { copyText(song.LocalPath) }},
 		})
 	}
-	groups = append(groups, []menuAction{save})
+	groups = append(groups, []menuAction{save, {label: "下载歌词", icon: iconLyrics, do: func() { a.openLyricDownload(song) }}})
 	// Its artists' and album's pages, those NetEase has.
 	var pages []menuAction
 	for _, ar := range tr.Artists {

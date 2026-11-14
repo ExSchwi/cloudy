@@ -708,6 +708,7 @@ func (a *app) downloadedSongActions(tr *netease.Track) [][]menuAction {
 		},
 		{{label: "在文件夹中显示", icon: iconFolder, do: func() { mygo.Shell.ShowItemInFolder(tr.LocalPath) }}},
 	}
+	groups = append(groups, []menuAction{{label: "下载歌词", icon: iconLyrics, do: func() { a.openLyricDownload(song) }}})
 	// Only what Cloudy downloaded: the listener's own music stays theirs.
 	if a.inDownloads(tr.LocalPath) {
 		groups = append(groups, []menuAction{{label: "从本地删除", icon: iconTrash, do: func() { a.confirmDeleteDownload(*tr) }}})
