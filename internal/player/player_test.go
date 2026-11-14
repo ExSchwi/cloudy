@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -408,6 +409,90 @@ func TestSetLimitDropsBeforeReturn(t *testing.T) {
 	c.settled(path)
 	c.SetLimit(50)
 	if _, err := os.Stat(filepath.Join(dir, "1-exhigh.mp3")); !os.IsNotExist(err) {
+		t.Fatal("SetLimit returned before dropping the song")
+	}
+}
+
+// A song opened while a scan is already underway must be pruned by the next
+// pass. Forgetting it left the cache over its limit with no cleaner running.
+func TestPruneSeesFileSettledDuringScan(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1000)
+	old := filepath.Join(dir, "1-exhigh.mp3")
+	if err := os.WriteFile(old, make([]byte, 900), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	setPruneHook(func() {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+	})
+	t.Cleanup(func() {
+		setPruneHook(nil)
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	done := make(chan struct{})
+	go func() {
+		c.SetLimit(1000)
+		close(done)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not start")
+	}
+	part := filepath.Join(dir, "new.part")
+	if err := os.WriteFile(part, make([]byte, 200), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, ok := c.keep(2, &netease.Stream{Level: "exhigh", Type: "mp3"}, part, 200)
+	if !ok {
+		t.Fatal("not kept")
+	}
+	c.settled(path)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SetLimit did not return")
+	}
+	if n := c.Size(); n > 1000 {
+		t.Fatalf("cache kept %d of 1000", n)
+	}
+}
+
+// While a just-kept song is still unopened, the cleaner waits instead of
+// scanning the directory again and again.
+func TestPruneWaitsWhileSongIsUnopened(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1000)
+	var passes atomic.Int32
+	setPruneHook(func() { passes.Add(1) })
+	t.Cleanup(func() { setPruneHook(nil) })
+	part := filepath.Join(dir, "new.part")
+	if err := os.WriteFile(part, make([]byte, 200), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, ok := c.keep(1, &netease.Stream{Level: "exhigh", Type: "mp3"}, part, 200)
+	if !ok {
+		t.Fatal("not kept")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := passes.Load(); n > 3 {
+		t.Fatalf("scanned %d times while the song was unopened", n)
+	}
+	c.settled(path)
+	c.SetLimit(50)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("SetLimit returned before dropping the song")
 	}
 }

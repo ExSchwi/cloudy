@@ -24,6 +24,8 @@ type Cache struct {
 	dir     string // where the songs are, which the listener may move
 	limit   int64  // in bytes; 0 keeps nothing
 	fresh   map[string]struct{}
+	dirty   bool
+	waiting int
 	running bool
 }
 
@@ -166,15 +168,7 @@ func (c *Cache) keeper(id int64, st *netease.Stream) (func(string, int64) (strin
 }
 
 func (c *Cache) settled(path string) {
-	c.mu.Lock()
-	delete(c.fresh, path)
-	start := !c.running
-	if start {
-		c.running = true
-	}
-	c.cond.Broadcast()
-	c.mu.Unlock()
-	if start {
+	if c.note(path, false) {
 		go c.pruneLoop()
 	}
 }
@@ -266,21 +260,12 @@ func (c *Cache) remove(path string) {
 func (c *Cache) protect(path string) {
 	c.mu.Lock()
 	c.fresh[path] = struct{}{}
-	c.cond.Broadcast()
 	c.mu.Unlock()
 }
 
 // kick queues path and reports whether this call must start the cleaner.
 func (c *Cache) kick(path string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.fresh[path] = struct{}{}
-	if c.running {
-		c.cond.Broadcast()
-		return false
-	}
-	c.running = true
-	return true
+	return c.note(path, true)
 }
 
 func (c *Cache) forget(path string) {
@@ -290,38 +275,71 @@ func (c *Cache) forget(path string) {
 	c.mu.Unlock()
 }
 
+// note protects path until playback opens it, or forgets that protection.
+// Either way the cleaner has new work, but only one cleaner runs.
+func (c *Cache) note(path string, keep bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if keep {
+		c.fresh[path] = struct{}{}
+	} else {
+		delete(c.fresh, path)
+	}
+	c.dirty = true
+	c.cond.Broadcast()
+	if c.running {
+		return false
+	}
+	c.running = true
+	return true
+}
+
 // pruneWait runs a clean to the end. Callers that change the limit or the
 // directory expect songs over the limit to be gone before they return.
 func (c *Cache) pruneWait() {
 	c.mu.Lock()
-	for c.running {
-		c.cond.Wait()
+	c.dirty = true
+	c.waiting++
+	start := !c.running
+	if start {
+		c.running = true
+		c.mu.Unlock()
+		c.pruneLoop()
+		c.mu.Lock()
+	} else {
+		c.cond.Broadcast()
+		for c.running {
+			c.cond.Wait()
+		}
 	}
-	c.running = true
+	c.waiting--
 	c.mu.Unlock()
-	c.pruneLoop()
 }
 
 // pruneLoop drops what is over the limit away from the download lock.
-// A pass keeps the songs still being handed to playback, then drops older
-// ones until the cache fits; songs landed meanwhile are seen on the next pass.
+// A pass keeps songs still being handed to playback. Work that arrives
+// during the pass is done again; otherwise it waits for that hand-off.
 func (c *Cache) pruneLoop() {
 	for {
-		if hook := pruneHook.Load(); hook != nil {
-			(*hook)()
-		}
 		c.mu.Lock()
 		dir, limit := c.dir, c.limit
+		c.dirty = false
 		c.mu.Unlock()
 		c.removeOver(dir, limit)
 		c.mu.Lock()
-		if len(c.fresh) == 0 {
-			c.running = false
-			c.cond.Broadcast()
+		if c.dirty {
 			c.mu.Unlock()
-			return
+			continue
 		}
+		if len(c.fresh) > 0 && c.waiting == 0 {
+			c.cond.Wait()
+			c.mu.Unlock()
+			continue
+		}
+		c.running = false
+		c.cond.Broadcast()
 		c.mu.Unlock()
+		return
 	}
 }
 
@@ -332,6 +350,9 @@ func (c *Cache) removeOver(dir string, limit int64) {
 	}
 	dropParts(dir, time.Hour)
 	songs := songsIn(dir)
+	if hook := pruneHook.Load(); hook != nil {
+		(*hook)()
+	}
 	slices.SortFunc(songs, func(a, b cachedSong) int { return a.used.Compare(b.used) })
 	var total int64
 	for _, f := range songs {
@@ -344,7 +365,6 @@ func (c *Cache) removeOver(dir string, limit int64) {
 		c.mu.Lock()
 		_, fresh := c.fresh[f.path]
 		if !fresh {
-			delete(c.fresh, f.path)
 			c.remove(f.path)
 			total -= f.size
 		}
