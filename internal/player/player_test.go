@@ -203,7 +203,9 @@ func TestCache(t *testing.T) {
 		f := c.part(st)
 		f.Write(make([]byte, n))
 		f.Close()
-		c.keep(id, st, f.Name(), int64(n))
+		if path, ok := c.keep(id, st, f.Name(), int64(n)); ok {
+			c.settled(path)
+		}
 	}
 	store(1, &netease.Stream{Level: "lossless", Type: "flac", Gain: -3}, 100)
 	dl, st, ok := c.lookup(1, "exhigh")
@@ -220,6 +222,19 @@ func TestCache(t *testing.T) {
 	store(3, &netease.Stream{Level: "exhigh", Type: "mp3"}, 100)
 	store(4, &netease.Stream{Level: "exhigh", Type: "mp3"}, 100)
 	store(5, &netease.Stream{Level: "exhigh", Type: "mp3"}, 100)
+	// Prune runs aside, so the oldest song is gone once it finishes.
+	deadline := time.Now().Add(2 * time.Second)
+	oldSong := filepath.Join(dir, "1-lossless.flac")
+	for {
+		_, err := os.Stat(oldSong)
+		if os.IsNotExist(err) && c.Size() <= 400 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("prune did not finish")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if _, _, ok := c.lookup(1, "standard"); ok {
 		t.Error("kept the song played longest ago")
 	}
@@ -234,6 +249,166 @@ func TestCache(t *testing.T) {
 	c.Clear()
 	if n := c.Size(); n != 0 {
 		t.Errorf("cleared to %d", n)
+	}
+}
+
+// Keeping a song returns before the cache directory is cleaned. The download
+// lock is held across keep, and the decoder waits on it.
+func TestKeepReturnsBeforePrune(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1000)
+	old := filepath.Join(dir, "1-exhigh.mp3")
+	if err := os.WriteFile(old, make([]byte, 900), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	part := filepath.Join(dir, "new.part")
+	if err := os.WriteFile(part, make([]byte, 200), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	setPruneHook(func() {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+	})
+	t.Cleanup(func() {
+		setPruneHook(nil)
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	done := make(chan struct{})
+	go func() {
+		c.keep(2, &netease.Stream{Level: "exhigh", Type: "mp3"}, part, 200)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("keep waited for the cache to be pruned")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not start")
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatal("prune deleted before keep returned")
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, err := os.Stat(old)
+		if os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the older song was not dropped")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	kept := filepath.Join(dir, "2-exhigh.mp3")
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatal("the song just kept was dropped")
+	}
+	c.settled(kept)
+}
+
+// Two songs kept while a clean is waiting must both survive it. The first
+// clean used to protect only its own path and delete the other.
+func TestPruneKeepsSongsKeptTogether(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1000)
+	old := filepath.Join(dir, "1-exhigh.mp3")
+	if err := os.WriteFile(old, make([]byte, 900), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	setPruneHook(func() {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-release
+	})
+	t.Cleanup(func() {
+		setPruneHook(nil)
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	keep := func(id int64) {
+		t.Helper()
+		part := filepath.Join(dir, "new"+string(rune('0'+id))+".part")
+		if err := os.WriteFile(part, make([]byte, 200), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := c.keep(id, &netease.Stream{Level: "exhigh", Type: "mp3"}, part, 200); !ok {
+			t.Fatalf("song %d was not kept", id)
+		}
+	}
+	keep(2)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not start")
+	}
+	keep(3)
+	older := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "3-exhigh.mp3"), older, older); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, err := os.Stat(old)
+		if os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the older song was not dropped")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, name := range []string{"2-exhigh.mp3", "3-exhigh.mp3"} {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s was dropped", name)
+		}
+		c.settled(path)
+	}
+}
+
+// Changing the limit waits until songs over it are gone.
+func TestSetLimitDropsBeforeReturn(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1000)
+	part := filepath.Join(dir, "new.part")
+	if err := os.WriteFile(part, make([]byte, 100), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, ok := c.keep(1, &netease.Stream{Level: "exhigh", Type: "mp3"}, part, 100)
+	if !ok {
+		t.Fatal("not kept")
+	}
+	c.settled(path)
+	c.SetLimit(50)
+	if _, err := os.Stat(filepath.Join(dir, "1-exhigh.mp3")); !os.IsNotExist(err) {
+		t.Fatal("SetLimit returned before dropping the song")
 	}
 }
 
