@@ -273,6 +273,23 @@ func (a *app) post(fn func()) {
 	})
 }
 
+// postQuiet returns a post that runs fn on the main thread but redraws
+// only if shown, asked there, says what fn changed is on screen: progress
+// every tenth of a second that nothing shows wakes no window.
+func (a *app) postQuiet(shown func() bool) func(func()) {
+	return func(fn func()) {
+		if a.win == nil {
+			return
+		}
+		mygo.RunOnMain(func() {
+			fn()
+			if shown() {
+				a.redraw()
+			}
+		})
+	}
+}
+
 func (a *app) redraw() {
 	if a.trayPopup != nil {
 		a.trayPopup.Invalidate()
@@ -350,6 +367,8 @@ func Run() error {
 		a.pl.Normalize = func() bool { return a.settings.Normalize }
 		a.pl.Crossfade = a.crossfade
 		a.pl.Cache = newSongCache(a.settings.CacheFolder, a.settings.CacheMB)
+		a.pl.Loud = openLoudness()
+		go player.DropStreamSpools()
 		a.pl.LocalFile = a.downloadedFile
 		a.noteDownloadsAtStart()
 		a.pl.Listened = func(t netease.Track, played time.Duration, ended bool) {

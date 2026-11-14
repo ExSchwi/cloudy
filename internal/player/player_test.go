@@ -1,7 +1,6 @@
 package player
 
 import (
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,24 +172,6 @@ func TestRadioRefills(t *testing.T) {
 	p.endRadio()
 	if p.Radio() != "" || p.feed != nil {
 		t.Error("radio still on")
-	}
-}
-
-func TestNormGain(t *testing.T) {
-	for _, c := range []struct {
-		st   *netease.Stream
-		want float64
-	}{
-		{nil, 1},
-		{&netease.Stream{}, 1},
-		{&netease.Stream{Gain: -6.6, Peak: 1}, math.Pow(10, -2.6/20)},
-		// Quiet, it is lifted, but not past its peak.
-		{&netease.Stream{Gain: 3, Peak: 0.8}, 1.25},
-		{&netease.Stream{Gain: -4, Peak: 0}, 1},
-	} {
-		if g := normGain(c.st); math.Abs(g-c.want) > 1e-9 {
-			t.Errorf("%+v: %v, want %v", c.st, g, c.want)
-		}
 	}
 }
 

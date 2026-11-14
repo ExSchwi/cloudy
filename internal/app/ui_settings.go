@@ -1139,7 +1139,7 @@ func (a *app) settingsAboutPage(k *settingsKit) {
 			})
 			// Installing in the background goes with the checks,
 			// which find what it installs.
-			k.sub("自动安装更新", "在后台下载并装好新版本，不弹窗，下次打开软件时生效", s.UpdateChecks, func() {
+			k.sub("自动安装更新", "后台发现新版本时直接装好，下次打开软件时生效；手动检查仍会先问你", s.UpdateChecks, func() {
 				k.toggle("update-downloads", "自动安装更新", &s.UpdateInstall, false, nil)
 			})
 			k.row("当前版本 "+mygo.App.Version(), "新版本来自 GitHub 的 nya-owo/cloudy", func() {
