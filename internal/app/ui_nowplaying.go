@@ -169,7 +169,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 	// An episode has what it is about and its captions in place of lyrics;
 	// a song, lyrics in place of those.
 	switch program := tr.ProgramID != 0; {
-	case program && a.npPane == paneWall:
+	case program && (a.npPane == paneWall || a.npPane == paneWiki):
 		a.npPane = paneQueue
 	case program && (a.npPane == paneLyrics || a.npPane == paneStage):
 		a.npPane = paneProgram
@@ -179,6 +179,8 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 	case program && a.npPane == paneCaptions && !a.captionsShown():
 		a.npPane = paneProgram
 	case !program && (a.npPane == paneProgram || a.npPane == paneCaptions):
+		a.npPane = a.lyricsPaneChosen()
+	case a.npPane == paneWiki && !wikiShown(tr):
 		a.npPane = a.lyricsPaneChosen()
 	}
 	if a.npPane != paneQueue {
@@ -221,7 +223,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 			return
 		}
 
-		side := float32(math.Min(float64(w)*0.36, 440))
+		side := npSideMax(w)
 		// The column is in the middle of the room under the strip, and the
 		// cover leaves room above it for the tabs, and as much under the
 		// column: as small as it takes for what goes under it (a radio's
@@ -237,9 +239,10 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 		// the controls.
 		side = max(coverSize, 280)
 		padX := npSideX(w)
+		a.more.npPaneW = w - 2*padX - side - npGapX(w)
 		tabs := npTabsRow(c, w)
 		reveal(tabs, pointerIn).Children(func() { a.paneTabs(c, tabs) })
-		row := ui.Row(c.Key("np-row")).Grow(1).Padding(0, padX, npRowFoot, padX).Gap(72).AlignItems(ui.Stretch)
+		row := ui.Row(c.Key("np-row")).Grow(1).Padding(0, padX, npRowFoot, padX).Gap(npGapX(w)).AlignItems(ui.Stretch)
 		row.Children(func() {
 			var coverTop float32
 			var volume ui.Element
@@ -253,7 +256,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 						if r := pl.Radio(); r != "" {
 							a.radioChip(c, r)
 						}
-						title := ui.Text(c, tr.Name).FontSize(22).FontWeight(700).LetterSpacing(-0.3).SingleLine()
+						_, title := a.marqueeLine(c, "np-title", tr.Name, 22, 700, -0.3)
 						a.npSpot.title = title.LayoutBounds()
 						a.flown(title)
 						a.artistLinks(c, tr, white.Alpha(0.6), white, true).FontSize(15).SingleLine()
@@ -324,6 +327,8 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 					tools = a.lyricsPane(c, tr, h)
 				case paneComments:
 					a.commentsPane(c, tr)
+				case paneWiki:
+					a.wikiPane(c, tr)
 				case paneProgram:
 					a.programPane(c, tr)
 				case paneCaptions:
@@ -346,14 +351,36 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 	}
 }
 
-// npMaxWidth is how wide the cover and the pane beside it go, at most.
-const npMaxWidth = 1280
+// Now Playing grows with its window rather than keeping to a column in the
+// middle of it: in a wide window the room beside the cover's column, the
+// gap after it, the cover and the lyrics' type all grow, so that the
+// lyrics, still set from the left, take the width rather than leaving its
+// right empty. Past npMaxWidth the two keep together in the middle.
 
-// npSideX is how far in from the sides of a view w wide the cover and the
-// pane beside it are: in a wide window they keep together in the middle,
-// rather than the pane taking all the width the cover leaves.
+// npMaxWidth is how wide the cover's column and the pane beside it go, at
+// most.
+const npMaxWidth = 1680
+
+// npSideX is how far in from the sides of a view w wide the cover's column
+// and the pane are: a share of the width, at least 72.
 func npSideX(w float32) float32 {
-	return max(72, (w-npMaxWidth)/2)
+	return max(72, w*0.075, (w-npMaxWidth)/2)
+}
+
+// npGapX is the room between the cover's column and the pane.
+func npGapX(w float32) float32 {
+	return max(64, min(136, w*0.055))
+}
+
+// npSideMax is how large the cover goes in a view w wide, room allowing.
+func npSideMax(w float32) float32 {
+	return min(w*0.34, 540)
+}
+
+// npLyricGrow is how much larger than at its usual size the lyrics are set
+// in a pane paneW wide: none up to 640, at most a quarter more.
+func npLyricGrow(paneW float32) float32 {
+	return max(1, min(1.25, 1+(paneW-640)/1600))
 }
 
 // npTabsHeight is how tall the row of Now Playing's tabs is, for what is
@@ -404,6 +431,7 @@ const (
 	paneProgram
 	paneCaptions
 	paneWall
+	paneWiki
 )
 
 // npTab is a tab of Now Playing: its pane, and what it says.
@@ -422,7 +450,11 @@ func (a *app) npTabs() []npTab {
 		}
 		return append(tabs, npTab{paneQueue, "待播清单"}, npTab{paneComments, "评论"})
 	}
-	return []npTab{{paneLyrics, "歌词"}, {paneStage, "律动"}, {paneQueue, "待播清单"}, {paneWall, "选歌"}, {paneComments, "评论"}}
+	tabs := []npTab{{paneLyrics, "歌词"}, {paneStage, "律动"}, {paneQueue, "待播清单"}, {paneWall, "选歌"}, {paneComments, "评论"}}
+	if wikiShown(a.pl.Current()) {
+		tabs = append(tabs, npTab{paneWiki, "百科"})
+	}
+	return tabs
 }
 
 // paneTabs fills row with the tabs of Now Playing, a pill sliding under them
@@ -606,7 +638,7 @@ func (a *app) lyricsPane(c *ui.Context, tr *netease.Track, h float32) bool {
 	if a.settings.LyricPerspective {
 		scroll.Effect(scrollEdgeFade{depth: 72, top: easeRange(a.lyricScroll.Y, 0, 16), bottom: 1})
 	}
-	st := linesStyle{size: 30 * a.lyricScale(), weight: 800, lineHeight: 1.25, shift: shift}
+	st := linesStyle{size: 30 * a.lyricScale() * npLyricGrow(a.more.npPaneW), weight: 800, lineHeight: 1.25, shift: shift}
 	if a.settings.LyricPerspective {
 		st.tilt = 2 * clamp01(float32(a.settings.LyricTilt))
 		if a.motion != motionOff {

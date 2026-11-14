@@ -257,7 +257,7 @@ func commentBadge(n int) string {
 
 // barCommentButton is commentCountButton in the player bar, by the heart:
 // a click opens Now Playing on the comments.
-func (a *app) barCommentButton(c *ui.Context, tr *netease.Track, size float32, color ui.Color) ui.Element {
+func (a *app) barCommentButton(c *ui.Context, tr *netease.Track, size float32, color ui.Color, counted bool) ui.Element {
 	if !commentable(tr) {
 		return ui.Box(c)
 	}
@@ -265,7 +265,14 @@ func (a *app) barCommentButton(c *ui.Context, tr *netease.Track, size float32, c
 	if cs := a.commentsFor(tr); cs.loaded {
 		n = cs.total
 	}
-	wrap := ui.Box(c).Width(size + max(40, size*1.6)).Height(size + 16).AlignItems(ui.Start)
+	if !counted {
+		n = 0
+	}
+	wide := size + 16
+	if n > 0 {
+		wide = size + max(40, size*1.6)
+	}
+	wrap := ui.Box(c).Width(wide).Height(size + 16).AlignItems(ui.Start)
 	wrap.Children(func() {
 		if iconButton(c.Key("comments"), iconComment, size*0.9, color, "评论").Clicked() {
 			a.npPane = paneComments

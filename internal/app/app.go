@@ -148,7 +148,7 @@ type app struct {
 	sysAccent    string    // the desktop's accent as #RRGGBB, "" where it has none
 	npOpen       bool      // Now Playing as it last showed: open or not
 	npChangedAt  time.Time // when it last opened or closed
-	npPane       int       // paneLyrics, paneQueue, paneStage, paneComments, paneProgram or paneCaptions
+	npPane       int       // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
 	npPaneTop    float32   // how far the cover beside the pane starts below its top
 	npRest       float32   // how tall what goes under the cover is, as last laid out
 	lyricScroll  ui.ScrollState
