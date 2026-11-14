@@ -22,6 +22,7 @@ type lyricDownloadState struct {
 	song         netease.Track
 	timestamps   bool
 	translations bool
+	separate     bool
 	format       string
 }
 
@@ -38,22 +39,38 @@ func (a *app) lyricDownloadDialog(c *ui.Context) {
 	s := &a.lyricDownload
 	a.dialog(c, "download-lyrics", 0.25, &s.open, func(panel ui.Element) {
 		ink := a.inkOn(a.nowPlaying)
-		panel.Width(420).TextColor(ink.text).Label("下载歌词")
+		panel.Width(480).Clip().TextColor(ink.text).Label("下载歌词")
+		// Animate layout heights directly: overlay layout runs again after
+		// Element.Transition and would otherwise snap the dialog to its new size.
+		reveal := func(key string, shown bool, height float32, build func() ui.Element) {
+			group := ui.Column(c.Key(key)).Shrink(0).Clip()
+			k := b2f(shown)
+			if a.motion > motionOff {
+				k = clamp01(group.AnimateTo("expanded", k, motionPane))
+			}
+			if shown || k > 0 {
+				group.Disabled(!shown).Children(func() {
+					content := build().Margin(18, 0, 0, 0).Shrink(0)
+					if measured := content.LayoutBounds().H; measured > 0 {
+						height = measured
+					}
+				})
+			}
+			group.Height((height + 18) * k).Opacity(k)
+		}
 		a.pane(panel, 26, a.nowPlaying)
 		panel.Children(func() {
 			dialogHeader(c, ink, "下载歌词", s.song.Name, func() { s.open = false })
-			ui.Column(c).PaddingX(28).Gap(16).Children(func() {
-				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+			ui.Column(c.Key("options")).PaddingX(28).Children(func() {
+				ui.Row(c.Key("timestamp-row")).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "包含时间戳").FontSize(14)
 					ui.Switch(c.Key("timestamps"), &s.timestamps).Label("切换歌词时间戳")
 				})
-				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "包含翻译").FontSize(14)
-					ui.Switch(c.Key("translations"), &s.translations).Label("切换歌词翻译")
-				})
-				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Disabled(!s.timestamps).Children(func() {
-					ui.Text(c, "时间戳格式").FontSize(14)
-					a.paneSelect(c.Key("format"), "歌词文件格式", &s.format, []string{"LRC", "SRT"})
+				reveal("format-section", s.timestamps, 32, func() ui.Element {
+					return ui.Row(c.Key("format-row")).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "时间戳格式").FontSize(14)
+						a.paneSelect(c.Key("format"), "歌词文件格式", &s.format, []string{"LRC", "SRT"})
+					})
 				})
 				hint := "LRC 保留歌词时间轴，适合音乐播放器。"
 				if !s.timestamps {
@@ -61,7 +78,20 @@ func (a *app) lyricDownloadDialog(c *ui.Context) {
 				} else if s.format == "SRT" {
 					hint = "SRT 包含字幕起止时间，适合导入 PR、达芬奇等剪辑软件。"
 				}
-				ui.Text(c, hint).FontSize(12.5).LineHeight(1.5).TextColor(ink.muted)
+				ui.Text(c.Key("format-hint"), hint).Margin(18, 0, 0, 0).FontSize(12.5).LineHeight(1.5).TextColor(ink.muted)
+				ui.Row(c.Key("translation-row")).Margin(18, 0, 0, 0).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "包含翻译").FontSize(14)
+					ui.Switch(c.Key("translations"), &s.translations).Label("切换歌词翻译")
+				})
+				reveal("translation-section", s.translations, 20, func() ui.Element {
+					return ui.Row(c.Key("separate-row")).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "分离翻译").FontSize(14)
+						ui.Switch(c.Key("separate"), &s.separate).Label("切换分离翻译")
+					})
+				})
+				reveal("separate-explanation", s.translations && s.separate, 20, func() ui.Element {
+					return ui.Text(c.Key("separate-hint"), "在所选文件夹中保存为“歌曲名-原词”和“歌曲名-翻译”两个文件。").FontSize(12.5).LineHeight(1.5).TextColor(ink.muted)
+				})
 			})
 			dialogFooter(c, func() {
 				if settingButton(c.Key("cancel"), ink, "取消", nil, false, false).Clicked() {
@@ -99,12 +129,13 @@ type lyricDownloadRequest struct {
 	loaded       bool
 	format       string
 	translations bool
+	separate     bool
 	folder       string
 	parent       *mygo.Window
 }
 
 func (a *app) lyricDownloadRequest(song netease.Track, format string, translations bool) lyricDownloadRequest {
-	r := lyricDownloadRequest{song: song, format: format, translations: translations, folder: a.downloadFolder(), parent: a.win}
+	r := lyricDownloadRequest{song: song, format: format, translations: translations, separate: translations && a.lyricDownload.separate, folder: a.downloadFolder(), parent: a.win}
 	if current := a.pl.Current(); current != nil && current.ID == song.ID && current.LocalPath == song.LocalPath {
 		lines, loaded := a.pl.Lyrics()
 		r.lines, r.loaded = append([]lyrics.Line(nil), lines...), loaded
@@ -115,6 +146,8 @@ func (a *app) lyricDownloadRequest(song netease.Track, format string, translatio
 // Tests replace the network and native save dialog; file writes remain real.
 var downloadLyricsOf = netease.Lyrics
 var chooseLyricPath = mygo.Dialog.Save
+var chooseLyricFolder = mygo.Dialog.Open
+var confirmLyricOverwrite = mygo.Dialog.Message
 
 func (r lyricDownloadRequest) load() ([]lyrics.Line, error) {
 	if r.loaded {
@@ -150,6 +183,9 @@ func (r lyricDownloadRequest) save() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if r.translations && r.separate {
+		return r.saveSeparate(lines)
+	}
 	text, err := lyricsFileText(lines, r.format, r.translations, time.Duration(r.song.Duration)*time.Millisecond)
 	if err != nil {
 		return "", err
@@ -178,6 +214,62 @@ func (r lyricDownloadRequest) save() (string, error) {
 	return path, nil
 }
 
+func (r lyricDownloadRequest) saveSeparate(lines []lyrics.Line) (string, error) {
+	duration := time.Duration(r.song.Duration) * time.Millisecond
+	original, err := lyricsFileText(lines, r.format, false, duration)
+	if err != nil {
+		return "", err
+	}
+	translated := make([]lyrics.Line, len(lines))
+	for i, line := range lines {
+		// Retain even untranslated lines' boundaries so SRT cues end at the
+		// same time in both files, rather than lingering across a missing line.
+		translated[i] = lyrics.Line{At: line.At, End: line.End, Text: line.Translation}
+	}
+	translation, err := lyricsFileText(translated, r.format, false, duration)
+	if err != nil {
+		return "", errors.New("这首歌暂无翻译，请关闭分离翻译或包含翻译后重试")
+	}
+	folders, err := chooseLyricFolder(mygo.OpenDialogOptions{
+		Parent: r.parent, Title: "选择歌词保存文件夹", ButtonLabel: "保存到此文件夹",
+		DefaultPath: r.folder, Directory: true, CreateDirectories: true,
+	})
+	if err != nil || len(folders) == 0 {
+		return "", err
+	}
+	names := []string{download.LyricFileName(r.song, "原词", r.format), download.LyricFileName(r.song, "翻译", r.format)}
+	paths := []string{filepath.Join(folders[0], names[0]), filepath.Join(folders[0], names[1])}
+	var existing []string
+	for i, path := range paths {
+		info, err := os.Lstat(path)
+		if err == nil {
+			if !info.Mode().IsRegular() {
+				return "", fmt.Errorf("无法覆盖 %s：目标不是普通文件", names[i])
+			}
+			existing = append(existing, names[i])
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	if len(existing) > 0 {
+		result, err := confirmLyricOverwrite(mygo.MessageOptions{
+			Parent: r.parent, Type: mygo.MessageQuestion, Title: "覆盖歌词文件",
+			Message: "以下文件已存在，是否覆盖？", Detail: strings.Join(existing, "\n"),
+			Buttons: []string{"取消", "覆盖"}, DefaultButton: 0, CancelButton: 0,
+		})
+		if err != nil || result.Button != 1 {
+			return "", err
+		}
+	}
+	if err := writeFileAtomic(paths[0], []byte(original), 0o644); err != nil {
+		return "", err
+	}
+	if err := writeFileAtomic(paths[1], []byte(translation), 0o644); err != nil {
+		return "", fmt.Errorf("原词已保存至 %s，翻译保存失败：%w", paths[0], err)
+	}
+	return strings.Join(paths, "；"), nil
+}
+
 func lyricsFileText(lines []lyrics.Line, format string, translations bool, duration time.Duration) (string, error) {
 	if format != "txt" && format != "lrc" && format != "srt" {
 		return "", errors.New("不支持的歌词格式")
@@ -190,7 +282,7 @@ func lyricsFileText(lines []lyrics.Line, format string, translations bool, durat
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		text := strings.TrimSpace(line.Text)
-		if text == "" {
+		if text == "" && format != "srt" {
 			continue
 		}
 		trans := ""
@@ -213,7 +305,10 @@ func lyricsFileText(lines []lyrics.Line, format string, translations bool, durat
 		case "srt":
 			start, end := max(0, line.At), line.End
 			if trans != "" {
-				text += "\r\n" + trans
+				if text != "" {
+					text += "\r\n"
+				}
+				text += trans
 			}
 			// Lines sharing a timestamp form one bilingual or multiline cue.
 			for i+1 < len(lines) && lines[i+1].At == line.At {
@@ -224,10 +319,16 @@ func lyricsFileText(lines []lyrics.Line, format string, translations bool, durat
 						continue
 					}
 					if extra = strings.TrimSpace(extra); extra != "" {
-						text += "\r\n" + extra
+						if text != "" {
+							text += "\r\n"
+						}
+						text += extra
 					}
 				}
 				end = max(end, other.End)
+			}
+			if text == "" {
+				continue
 			}
 			if end <= start {
 				end = start + 5*time.Second

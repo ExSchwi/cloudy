@@ -281,3 +281,214 @@ func TestLyricDownloadTranslationToggle(t *testing.T) {
 		t.Fatal("export removed the displayed translation")
 	}
 }
+
+// Collapsing options removes their controls, retains the selected format and ignores hidden separation.
+func TestLyricDownloadConditionalOptions(t *testing.T) {
+	a := newTestApp()
+	a.settings = defaultSettings()
+	song := netease.Track{ID: 7, Name: "song"}
+	a.openLyricDownload(song)
+	tt := ui.NewTester(func(c *ui.Context) { a.pal = paletteFor(c.Theme()); a.motion = motionOff; a.lyricDownloadDialog(c) }, 480, 560)
+	if err := chooseItem(tt, "歌词文件格式", "SRT"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := tt.Click("切换歌词时间戳"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := tt.Find("歌词文件格式"); ok {
+			t.Fatal("format picker remained interactive without timestamps")
+		}
+		tt.Frame()
+		if err := tt.Click("切换歌词时间戳"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := tt.Find("歌词文件格式"); !ok || a.lyricDownload.format != "SRT" {
+			t.Fatal("reopening the format picker lost the selection")
+		}
+	}
+	if err := tt.Click("切换分离翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.lyricDownloadRequest(song, "srt", true).separate {
+		t.Fatal("separation switch did not reach the export request")
+	}
+	if err := tt.Click("切换歌词翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tt.Find("切换分离翻译"); ok {
+		t.Fatal("separation switch remained interactive without translations")
+	}
+	request := a.lyricDownloadRequest(song, "srt", a.lyricDownload.translations)
+	if request.separate || request.translations {
+		t.Fatal("a hidden separation option enabled translated output")
+	}
+	if err := tt.Click("切换歌词翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("切换分离翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if a.lyricDownloadRequest(song, "srt", true).separate {
+		t.Fatal("turning separation off did not restore a combined export")
+	}
+}
+
+// Split exports produce two named files, preserve gaps in translation timing and leave playback lyrics intact.
+func TestLyricDownloadSeparateFiles(t *testing.T) {
+	old := chooseLyricFolder
+	defer func() { chooseLyricFolder = old }()
+	lines := []lyrics.Line{
+		{At: time.Second, Text: "original one", Translation: "translation one"},
+		{At: 3 * time.Second, Text: "untranslated"},
+		{At: 6 * time.Second, Text: "original last", Translation: "translation last"},
+	}
+	for _, tc := range []struct{ format, original, translated string }{
+		{"txt", "original one\r\nuntranslated\r\noriginal last\r\n", "translation one\r\ntranslation last\r\n"},
+		{"lrc", "[00:01.000]original one\r\n[00:03.000]untranslated\r\n[00:06.000]original last\r\n", "[00:01.000]translation one\r\n[00:06.000]translation last\r\n"},
+		{"srt", "1\r\n00:00:01,000 --> 00:00:03,000\r\noriginal one\r\n\r\n2\r\n00:00:03,000 --> 00:00:06,000\r\nuntranslated\r\n\r\n3\r\n00:00:06,000 --> 00:00:08,000\r\noriginal last\r\n\r\n", "1\r\n00:00:01,000 --> 00:00:03,000\r\ntranslation one\r\n\r\n2\r\n00:00:06,000 --> 00:00:08,000\r\ntranslation last\r\n\r\n"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			dir := t.TempDir()
+			calls := 0
+			chooseLyricFolder = func(opts mygo.OpenDialogOptions) ([]string, error) {
+				calls++
+				if !opts.Directory || opts.DefaultPath != dir {
+					t.Errorf("incorrect folder picker options: %+v", opts)
+				}
+				return []string{dir}, nil
+			}
+			r := lyricDownloadRequest{song: netease.Track{Name: "歌曲/名", Duration: 8000}, lines: lines, loaded: true, translations: true, separate: true, format: tc.format, folder: dir}
+			if _, err := r.save(); err != nil || calls != 1 {
+				t.Fatalf("split export = %v, chooser calls %d", err, calls)
+			}
+			for part, want := range map[string]string{"原词": tc.original, "翻译": tc.translated} {
+				b, err := os.ReadFile(filepath.Join(dir, "歌曲-名-"+part+"."+tc.format))
+				if err != nil || string(b) != want {
+					t.Fatalf("%s file = %q, %v; want %q", part, b, err, want)
+				}
+			}
+			files, _ := os.ReadDir(dir)
+			if len(files) != 2 || lines[0].Text != "original one" || lines[0].Translation != "translation one" {
+				t.Fatal("split export created extra files or changed the playback cache")
+			}
+		})
+	}
+}
+
+// Cancelling either split dialog, absent translations and invalid companion paths cannot change existing files.
+func TestLyricDownloadSeparateCancellation(t *testing.T) {
+	oldFolder, oldConfirm := chooseLyricFolder, confirmLyricOverwrite
+	defer func() { chooseLyricFolder, confirmLyricOverwrite = oldFolder, oldConfirm }()
+	dir := t.TempDir()
+	r := lyricDownloadRequest{song: netease.Track{Name: "song"}, loaded: true, translations: true, separate: true, format: "lrc", lines: lyrics.Build("[00:01]original", "[00:01]translation", "")}
+	chooseLyricFolder = func(mygo.OpenDialogOptions) ([]string, error) { return nil, nil }
+	if path, err := r.save(); path != "" || err != nil {
+		t.Fatalf("cancelled folder selection = %q, %v", path, err)
+	}
+	chooseLyricFolder = func(mygo.OpenDialogOptions) ([]string, error) { return []string{dir}, nil }
+	path := filepath.Join(dir, "song-翻译.lrc")
+	if err := os.WriteFile(path, []byte("keep translation"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	confirmed := false
+	confirmLyricOverwrite = func(opts mygo.MessageOptions) (mygo.MessageResult, error) {
+		confirmed = true
+		if !strings.Contains(opts.Detail, "song-翻译.lrc") {
+			t.Error("overwrite dialog omitted the existing companion file")
+		}
+		return mygo.MessageResult{Button: 0}, nil
+	}
+	if result, err := r.save(); result != "" || err != nil || !confirmed {
+		t.Fatalf("cancelled overwrite = %q, %v, confirmed %v", result, err, confirmed)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "keep translation" {
+		t.Fatalf("cancel changed translation: %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "song-原词.lrc")); !os.IsNotExist(err) {
+		t.Fatal("cancel wrote the original file")
+	}
+	confirmLyricOverwrite = func(mygo.MessageOptions) (mygo.MessageResult, error) { return mygo.MessageResult{Button: 1}, nil }
+	if _, err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "[00:01.000]translation\r\n" {
+		t.Fatalf("confirmed overwrite = %q, %v", b, err)
+	}
+	r.song.Name = "blocked"
+	if err := os.Mkdir(filepath.Join(dir, "blocked-翻译.lrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.save(); err == nil {
+		t.Fatal("a directory accepted as a companion file")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "blocked-原词.lrc")); !os.IsNotExist(err) {
+		t.Fatal("invalid companion path still wrote the original")
+	}
+	chooseLyricFolder = func(mygo.OpenDialogOptions) ([]string, error) {
+		t.Error("absent translation opened picker")
+		return nil, nil
+	}
+	r.lines = lyrics.Build("[00:01]original", "", "")
+	if _, err := r.save(); err == nil {
+		t.Fatal("missing translation exported as an empty companion")
+	}
+}
+
+// A simultaneous line without a translation must still contribute its end time to the translated SRT cue.
+func TestLyricDownloadSeparateSimultaneousCues(t *testing.T) {
+	dir := t.TempDir()
+	old := chooseLyricFolder
+	defer func() { chooseLyricFolder = old }()
+	chooseLyricFolder = func(mygo.OpenDialogOptions) ([]string, error) { return []string{dir}, nil }
+	r := lyricDownloadRequest{song: netease.Track{Name: "song"}, loaded: true, translations: true, separate: true, format: "srt", lines: []lyrics.Line{
+		{At: time.Second, End: 4 * time.Second, Text: "untranslated"},
+		{At: time.Second, End: 2 * time.Second, Text: "original", Translation: "translation"},
+	}}
+	if _, err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "song-翻译.srt"))
+	want := "1\r\n00:00:01,000 --> 00:00:04,000\r\ntranslation\r\n\r\n"
+	if err != nil || string(b) != want {
+		t.Fatalf("translated cue lost a simultaneous line's end time: %q, %v", b, err)
+	}
+}
+
+// Controls remain clickable while the dialog resizes, and the final choices still select a split export.
+func TestLyricDownloadDuringResize(t *testing.T) {
+	a := newTestApp()
+	a.settings = defaultSettings()
+	song := netease.Track{ID: 7, Name: "song"}
+	a.pl.Cue([]netease.Track{song})
+	a.pl.SetLyrics(lyrics.Build("[00:01]original", "[00:01]translation", ""))
+	a.openLyricDownload(song)
+	a.lyricDownload.timestamps, a.lyricDownload.translations = false, false
+	tt := ui.NewTester(func(c *ui.Context) { a.pal = paletteFor(c.Theme()); a.motion = motionFull; a.lyricDownloadDialog(c) }, 600, 620)
+	tt.Advance(time.Second)
+	for _, control := range []string{"切换歌词时间戳", "切换歌词翻译", "切换分离翻译"} {
+		if err := tt.Click(control); err != nil {
+			t.Fatal(err)
+		}
+		tt.Advance(60 * time.Millisecond)
+	}
+	tt.Advance(time.Second)
+	if err := chooseItem(tt, "歌词文件格式", "SRT"); err != nil {
+		t.Fatal(err)
+	}
+	old := chooseLyricFolder
+	defer func() { chooseLyricFolder = old }()
+	chosen := make(chan bool, 1)
+	chooseLyricFolder = func(opts mygo.OpenDialogOptions) ([]string, error) { chosen <- opts.Directory; return nil, nil }
+	if err := tt.Click("选择保存位置"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case directory := <-chosen:
+		if !directory || !a.lyricDownload.separate || a.lyricDownload.format != "SRT" {
+			t.Fatal("resizing lost an export option")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("save button did not reach the folder picker after resizing")
+	}
+}
