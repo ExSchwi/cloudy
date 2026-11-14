@@ -21,6 +21,7 @@ type lyricDownloadState struct {
 	open, saving bool
 	song         netease.Track
 	timestamps   bool
+	translations bool
 	format       string
 }
 
@@ -29,7 +30,7 @@ func (a *app) openLyricDownload(song netease.Track) {
 		a.toast = "正在保存歌词，请稍候"
 		return
 	}
-	a.lyricDownload = lyricDownloadState{open: true, song: song, timestamps: true, format: "LRC"}
+	a.lyricDownload = lyricDownloadState{open: true, song: song, timestamps: true, translations: true, format: "LRC"}
 	a.redraw()
 }
 
@@ -45,6 +46,10 @@ func (a *app) lyricDownloadDialog(c *ui.Context) {
 				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "包含时间戳").FontSize(14)
 					ui.Switch(c.Key("timestamps"), &s.timestamps).Label("切换歌词时间戳")
+				})
+				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "包含翻译").FontSize(14)
+					ui.Switch(c.Key("translations"), &s.translations).Label("切换歌词翻译")
 				})
 				ui.Row(c).Justify(ui.SpaceBetween).AlignItems(ui.Center).Disabled(!s.timestamps).Children(func() {
 					ui.Text(c, "时间戳格式").FontSize(14)
@@ -67,7 +72,7 @@ func (a *app) lyricDownloadDialog(c *ui.Context) {
 					if s.timestamps {
 						format = strings.ToLower(s.format)
 					}
-					r := a.lyricDownloadRequest(s.song, format)
+					r := a.lyricDownloadRequest(s.song, format, s.translations)
 					s.open, s.saving = false, true
 					go func() {
 						path, err := r.save()
@@ -89,16 +94,17 @@ func (a *app) lyricDownloadDialog(c *ui.Context) {
 // A request keeps the song, options and cached lyrics from the UI thread.
 // Changing tracks while a file dialog or network request is open cannot change it.
 type lyricDownloadRequest struct {
-	song   netease.Track
-	lines  []lyrics.Line
-	loaded bool
-	format string
-	folder string
-	parent *mygo.Window
+	song         netease.Track
+	lines        []lyrics.Line
+	loaded       bool
+	format       string
+	translations bool
+	folder       string
+	parent       *mygo.Window
 }
 
-func (a *app) lyricDownloadRequest(song netease.Track, format string) lyricDownloadRequest {
-	r := lyricDownloadRequest{song: song, format: format, folder: a.downloadFolder(), parent: a.win}
+func (a *app) lyricDownloadRequest(song netease.Track, format string, translations bool) lyricDownloadRequest {
+	r := lyricDownloadRequest{song: song, format: format, translations: translations, folder: a.downloadFolder(), parent: a.win}
 	if current := a.pl.Current(); current != nil && current.ID == song.ID && current.LocalPath == song.LocalPath {
 		lines, loaded := a.pl.Lyrics()
 		r.lines, r.loaded = append([]lyrics.Line(nil), lines...), loaded
@@ -144,7 +150,7 @@ func (r lyricDownloadRequest) save() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	text, err := lyricsFileText(lines, r.format, time.Duration(r.song.Duration)*time.Millisecond)
+	text, err := lyricsFileText(lines, r.format, r.translations, time.Duration(r.song.Duration)*time.Millisecond)
 	if err != nil {
 		return "", err
 	}
@@ -172,7 +178,7 @@ func (r lyricDownloadRequest) save() (string, error) {
 	return path, nil
 }
 
-func lyricsFileText(lines []lyrics.Line, format string, duration time.Duration) (string, error) {
+func lyricsFileText(lines []lyrics.Line, format string, translations bool, duration time.Duration) (string, error) {
 	if format != "txt" && format != "lrc" && format != "srt" {
 		return "", errors.New("不支持的歌词格式")
 	}
@@ -187,7 +193,10 @@ func lyricsFileText(lines []lyrics.Line, format string, duration time.Duration) 
 		if text == "" {
 			continue
 		}
-		trans := strings.TrimSpace(line.Translation)
+		trans := ""
+		if translations {
+			trans = strings.TrimSpace(line.Translation)
+		}
 		switch format {
 		case "txt":
 			out.WriteString(text + "\r\n")
@@ -210,7 +219,10 @@ func lyricsFileText(lines []lyrics.Line, format string, duration time.Duration) 
 			for i+1 < len(lines) && lines[i+1].At == line.At {
 				i++
 				other := lines[i]
-				for _, extra := range []string{other.Text, other.Translation} {
+				for j, extra := range []string{other.Text, other.Translation} {
+					if j == 1 && !translations {
+						continue
+					}
 					if extra = strings.TrimSpace(extra); extra != "" {
 						text += "\r\n" + extra
 					}

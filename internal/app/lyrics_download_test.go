@@ -28,7 +28,7 @@ func TestLyricsFileText(t *testing.T) {
 		{"srt", "1\r\n00:00:12,500 --> 00:00:15,000\r\n第一行🎵\r\nFirst line\r\n\r\n2\r\n00:00:15,000 --> 00:00:18,000\r\n第二行\r\n\r\n"},
 	} {
 		t.Run(tc.format, func(t *testing.T) {
-			got, err := lyricsFileText(lines, tc.format, 18*time.Second)
+			got, err := lyricsFileText(lines, tc.format, true, 18*time.Second)
 			if err != nil || got != tc.want {
 				t.Fatalf("export = %q, %v; want %q", got, err, tc.want)
 			}
@@ -43,12 +43,12 @@ func TestLyricsSubtitleTimes(t *testing.T) {
 		{At: time.Hour, Text: "second", Translation: "translation"},
 		{At: time.Hour + 2*time.Second, End: time.Hour + 3*time.Second, Text: "last"},
 	}
-	got, err := lyricsFileText(lines, "srt", 0)
+	got, err := lyricsFileText(lines, "srt", true, 0)
 	want := "1\r\n01:00:00,000 --> 01:00:02,000\r\nfirst\r\nsecond\r\ntranslation\r\n\r\n2\r\n01:00:02,000 --> 01:00:03,000\r\nlast\r\n\r\n"
 	if err != nil || got != want {
 		t.Fatalf("subtitle = %q, %v", got, err)
 	}
-	got, err = lyricsFileText(lines[:1], "lrc", 0)
+	got, err = lyricsFileText(lines[:1], "lrc", true, 0)
 	if err != nil || got != "[60:00.000]first\r\n" {
 		t.Fatalf("long LRC = %q, %v", got, err)
 	}
@@ -57,16 +57,16 @@ func TestLyricsSubtitleTimes(t *testing.T) {
 // Plain lyrics can be exported as text, but must never be given fabricated timing.
 func TestPlainLyricsExport(t *testing.T) {
 	lines := lyrics.FromText("plain lyrics\nsecond line")
-	if text, err := lyricsFileText(lines, "txt", 0); err != nil || text != "plain lyrics\r\nsecond line\r\n" {
+	if text, err := lyricsFileText(lines, "txt", true, 0); err != nil || text != "plain lyrics\r\nsecond line\r\n" {
 		t.Fatalf("plain text = %q, %v", text, err)
 	}
 	for _, format := range []string{"lrc", "srt"} {
-		if _, err := lyricsFileText(lines, format, 0); err == nil {
+		if _, err := lyricsFileText(lines, format, true, 0); err == nil {
 			t.Fatalf("plain lyrics exported as timed %s", format)
 		}
 	}
 	for _, lines := range [][]lyrics.Line{nil, {{Text: " "}}} {
-		if _, err := lyricsFileText(lines, "txt", 0); err == nil {
+		if _, err := lyricsFileText(lines, "txt", true, 0); err == nil {
 			t.Fatal("empty lyrics exported")
 		}
 	}
@@ -80,7 +80,7 @@ func TestLyricDownloadSnapshotsSong(t *testing.T) {
 	a.pl.Cue([]netease.Track{song})
 	lines := lyrics.Build("[00:01.25]original lyrics", "", "")
 	a.pl.SetLyrics(lines)
-	r := a.lyricDownloadRequest(song, "lrc")
+	r := a.lyricDownloadRequest(song, "lrc", true)
 	lines[0].Text = "changed cache"
 	a.pl.Cue([]netease.Track{{ID: 8, Name: "new song"}})
 	a.pl.SetLyrics(lyrics.Build("[00:02]wrong lyrics", "", ""))
@@ -213,5 +213,71 @@ func TestLyricDownloadMenuOptions(t *testing.T) {
 				t.Fatal("save action did not reach the file dialog")
 			}
 		})
+	}
+}
+
+// Excluding translations applies to all formats, including simultaneous SRT lines.
+func TestLyricsExportWithoutTranslations(t *testing.T) {
+	lines := []lyrics.Line{
+		{At: time.Second, End: 3 * time.Second, Text: "original", Translation: "translation"},
+		{At: time.Second, End: 3 * time.Second, Text: "second original", Translation: "second translation"},
+	}
+	for _, format := range []string{"txt", "lrc", "srt"} {
+		t.Run(format, func(t *testing.T) {
+			text, err := lyricsFileText(lines, format, false, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(text, "translation") || !strings.Contains(text, "original") || !strings.Contains(text, "second original") {
+				t.Fatalf("original-only export = %q", text)
+			}
+			text, err = lyricsFileText(lines, format, true, 0)
+			if err != nil || !strings.Contains(text, "translation") || !strings.Contains(text, "second translation") {
+				t.Fatalf("bilingual export = %q, %v", text, err)
+			}
+			if lines[0].Translation != "translation" || lines[1].Translation != "second translation" {
+				t.Fatal("export changed the playback cache")
+			}
+		})
+	}
+}
+
+// The translation switch controls the saved file, and later option changes do not affect a pending export.
+func TestLyricDownloadTranslationToggle(t *testing.T) {
+	a := newTestApp()
+	a.settings = defaultSettings()
+	a.settings.DownloadFolder = t.TempDir()
+	song := netease.Track{ID: 7, Name: "song"}
+	a.pl.Cue([]netease.Track{song})
+	a.pl.SetLyrics(lyrics.Build("[00:01]original", "[00:01]translation", ""))
+	a.openLyricDownload(song)
+	tt := ui.NewTester(func(c *ui.Context) { a.pal = paletteFor(c.Theme()); a.motion = motionOff; a.lyricDownloadDialog(c) }, 480, 400)
+	if err := tt.Click("切换歌词翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if a.lyricDownload.translations {
+		t.Fatal("translation switch did not turn off")
+	}
+	request := a.lyricDownloadRequest(song, "txt", a.lyricDownload.translations)
+	if err := tt.Click("切换歌词翻译"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.lyricDownload.translations {
+		t.Fatal("translation switch did not turn on")
+	}
+	old := chooseLyricPath
+	defer func() { chooseLyricPath = old }()
+	chooseLyricPath = func(opts mygo.SaveDialogOptions) (string, error) { return opts.DefaultPath, nil }
+	path, err := request.save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(path)
+	if err != nil || string(text) != "original\r\n" {
+		t.Fatalf("saved file = %q, %v", text, err)
+	}
+	lines, _ := a.pl.Lyrics()
+	if lines[0].Translation != "translation" {
+		t.Fatal("export removed the displayed translation")
 	}
 }
