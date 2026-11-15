@@ -531,7 +531,12 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 			hovered := info.Hovered()
 			info.Children(func() {
 				art := ui.Box(c).Size(48, 48).Shrink(0).Label("播放栏封面")
+				// Its menu makes the cover clickable, which takes the click
+				// from info: it opens Now Playing itself.
 				a.coverContext(art, tr)
+				if art.Clicked() {
+					a.nowPlaying = true
+				}
 				a.barSpot.cover = art.LayoutBounds()
 				a.lifted(art)
 				art.Children(func() {
