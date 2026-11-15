@@ -62,10 +62,12 @@ type app struct {
 	trayPopupDone   chan struct{}
 	trayPopupClosed time.Time
 
-	// thumbsAt is what the taskbar thumbnail shows (thumbbar.go), and
-	// thumbDark whether the taskbar is dark.
+	// thumbsAt is what the taskbar thumbnail shows (thumbbar.go),
+	// thumbDark whether the taskbar is dark, and altTab whether Alt+Tab is
+	// open (thumbswitch_windows.go).
 	thumbsAt  *thumbState
 	thumbDark bool
+	altTab    bool
 
 	route   route
 	history []route
@@ -413,6 +415,7 @@ func Run() error {
 		a.setMenu()
 		a.boot()
 		a.applyGlobalKeys()
+		a.watchAltTab()
 		// The notch player is macOS's, over its menu bar: elsewhere it would
 		// hang at the top of the screen as a black box.
 		if runtime.GOOS == "darwin" {

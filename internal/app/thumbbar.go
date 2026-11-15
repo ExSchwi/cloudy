@@ -15,12 +15,16 @@ import (
 // artists as its title, and under it the song before, play or pause, the
 // next, and the heart. They follow what plays, the heart, and the
 // taskbar's light or dark, whose color the glyphs take the other of.
+// While Alt+Tab is open, the window shows there as itself (watchAltTab):
+// DWM draws a cover no larger than it asks for, which in Alt+Tab is shorter
+// than the windows beside it.
 
 // thumbState is what the thumbnail shows; it changes only when this does.
 type thumbState struct {
 	track          int64 // 0: no song, nothing shown
 	title          string
 	cover          bool // the cover is in, and shows
+	switcher       bool // Alt+Tab is open: the window shows, not the cover
 	playing, dark  bool
 	liked, canLike bool
 }
@@ -44,6 +48,7 @@ func (a *app) syncThumbs() {
 			canLike: tr.LocalPath == "",
 		}
 	}
+	st.switcher = a.altTab
 	a.syncProgress()
 	at := a.thumbsAt
 	if at != nil && *at == st {
@@ -57,12 +62,13 @@ func (a *app) syncThumbs() {
 		}
 		a.win.SetTitle(title)
 	}
+	window := at != nil && (at.track == 0 || at.switcher) // what showed
 	switch {
-	case st.track == 0:
-		if at == nil || at.track != 0 {
+	case st.track == 0 || st.switcher:
+		if !window {
 			a.win.SetThumbnail(nil) // the window again
 		}
-	case st.cover && (at == nil || at.track != st.track || !at.cover):
+	case st.cover && (at == nil || window || at.track != st.track || !at.cover):
 		// The new cover is in. Until it is, the one before stays: going
 		// back to the window in between, which shows nothing while it is
 		// minimized or in the tray, left the thumbnail blank.
