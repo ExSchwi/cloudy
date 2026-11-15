@@ -288,9 +288,7 @@ func (a *app) playlistHeader(c *ui.Context, pl *netease.Playlist) {
 				meta = append(meta, plays(pl.PlayCount)+" 次播放")
 			}
 			ui.Text(c, strings.Join(meta, " · ")).FontSize(13).TextColor(p.muted)
-			if d := strings.TrimSpace(pl.Description); d != "" {
-				a.playlistSays(c, strings.ReplaceAll(d, "\n", " "))
-			}
+			a.introLine(c, "歌单简介", pl.Description, 0)
 			if a.batchActive(pl.ID) {
 				hint := "选择歌曲，完成后在下方选择下载、喜欢、下一首播放或加入队列"
 				if pl.SpecialType == 5 {

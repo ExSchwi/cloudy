@@ -81,10 +81,7 @@ func (a *app) countedHeart(c *ui.Context, tr *netease.Track, size float32, color
 		return a.likeButton(c, tr, size, color)
 	}
 	s := a.askRedCount(tr.ID)
-	red := ui.Hex("#d92d43")
-	if a.pal.dark || a.nowPlaying {
-		red = ui.Hex("#ff3b43")
-	}
+	red := a.heartRed()
 	shade := color
 	if a.isLiked(tr) {
 		shade = red
@@ -111,4 +108,12 @@ func (a *app) countedHeart(c *ui.Context, tr *netease.Track, size float32, color
 		}
 	})
 	return wrap
+}
+
+// heartRed is the red of a liked song's heart, brighter on the dark.
+func (a *app) heartRed() ui.Color {
+	if a.pal.dark || a.nowPlaying {
+		return ui.Hex("#ff3b43")
+	}
+	return ui.Hex("#d92d43")
 }

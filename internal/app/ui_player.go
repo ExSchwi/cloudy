@@ -513,7 +513,10 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 		bar.Left(0).Right(0).Bottom(0).Height(playerBarHeight).PaddingX(20)
 	}
 	bar.Children(func() {
-		// What plays.
+		// What plays, in its own share of the bar. Its title comes before the
+		// heart's and the comments' counts: a compact bar keeps the counts in
+		// the buttons' tooltips.
+		counts := !compact
 		ui.Row(c.Key("song-info")).Width(songWidth).Shrink(0).Gap(4).AlignItems(ui.Center).Opacity(foreground).Children(func() {
 			if tr == nil {
 				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -549,7 +552,8 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 					}
 				})
 				ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
-					title := ui.Text(c.Key(tr.ID), tr.Name).FontSize(13.5).FontWeight(600).SingleLine().Label("播放栏歌名").Tooltip(tr.Name).
+					line, title := a.marqueeLine(c.Key(tr.ID), "bar-title", tr.Name, 13.5, 600, 0)
+					line.Label("播放栏歌名").Tooltip(tr.Name).
 						Transition(ui.ElementTransition{Animation: &motionPane, Enter: &ui.Motion{Y: 10}, Exit: &ui.Motion{Y: -10}})
 					a.barSpot.title = title.LayoutBounds()
 					a.lifted(title)
@@ -574,8 +578,8 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 			if info.Clicked() {
 				a.nowPlaying = true
 			}
-			a.countedHeart(c.Key("like"), tr, 16, muted, !compact).Shrink(0)
-			a.barCommentButton(c.Key("comment-count"), tr, 16, muted, !compact).Shrink(0)
+			a.countedHeart(c.Key("like"), tr, 16, muted, counts).Shrink(0)
+			a.barCommentButton(c.Key("comment-count"), tr, 16, muted, counts).Shrink(0)
 		})
 
 		// Controls over the progress.

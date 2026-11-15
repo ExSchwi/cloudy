@@ -128,6 +128,7 @@ func (a *app) view(c *ui.Context) {
 	a.settingsPanel(c)
 	a.globalGlassDialog(c)
 	a.signOutDialog(c)
+	a.introDialog(c)
 	a.accentDialog(c)
 	a.updateDialog(c)
 	a.whatsNewDialog(c)
@@ -569,6 +570,12 @@ func (a *app) pageTop(c *ui.Context, foreground float32) {
 			Material(glass.ScrollEdge{Hard: true, Background: a.pal.bg})
 		edge.Opacity(edgeShown(edge, a.underTop))
 	}
+	// The settings, left of the window's own buttons, where apps keep them.
+	ui.Row(c.Key("top-settings")).Absolute().Top(0).Right(c.TitleBar().Right + 10).Height(topBar(c)).AlignItems(ui.Center).Opacity(foreground).Children(func() {
+		if iconButton(c.Key("settings"), iconSettings, 17, a.pal.muted, "设置").Clicked() {
+			a.openSettings()
+		}
+	})
 	if len(a.history) > 0 || len(a.forward) > 0 {
 		ui.Row(c).Absolute().Top(0).Left(20).Height(topBar(c)).AlignItems(ui.Center).Opacity(foreground).Children(func() {
 			back := iconButton(c.Key("back"), iconBack, 18, a.pal.muted, "返回").Disabled(len(a.history) == 0)
