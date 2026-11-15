@@ -36,7 +36,7 @@ func (a *app) syncThumbs() {
 		tr := a.pl.Current()
 		st = thumbState{
 			track:   tr.ID,
-			title:   songTitle(tr.Name, tr.ArtistNames()),
+			title:   songTitle(tr.Name, tr.ArtistNames(), mygo.App.Name()),
 			cover:   a.pl.Cover() != nil,
 			playing: a.pl.Playing(),
 			dark:    a.thumbDark,
@@ -96,12 +96,19 @@ func (a *app) syncThumbs() {
 }
 
 // songTitle is the window's title for a song: its name and its artists,
-// as NetEase's app shows it under its taskbar button.
-func songTitle(name, artists string) string {
-	if artists == "" {
-		return name
+// as NetEase's app shows it under its taskbar button, then the app's name,
+// as a browser ends its title. Apps that list windows by the part after the
+// last " - ", as Oopz does to share one app's sound, then name it Cloudy
+// rather than the artist playing.
+func songTitle(name, artists, app string) string {
+	title := name
+	if artists != "" {
+		title += " - " + artists
 	}
-	return name + " - " + artists
+	if app != "" {
+		title += " - " + app
+	}
+	return title
 }
 
 // hasSong reports whether there is a song to play: none at the start,
