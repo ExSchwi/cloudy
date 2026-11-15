@@ -257,28 +257,35 @@ func commentBadge(n int) string {
 
 // barCommentButton is commentCountButton in the player bar, by the heart:
 // a click opens Now Playing on the comments.
+// Without counted, the count is only in its tooltip.
 func (a *app) barCommentButton(c *ui.Context, tr *netease.Track, size float32, color ui.Color, counted bool) ui.Element {
 	if !commentable(tr) {
 		return ui.Box(c)
 	}
+	cs := a.commentsFor(tr)
 	n := 0
-	if cs := a.commentsFor(tr); cs.loaded {
+	if cs.loaded {
 		n = cs.total
 	}
+	shown := n
 	if !counted {
-		n = 0
+		shown = 0
 	}
 	wide := size + 16
-	if n > 0 {
+	if shown > 0 {
 		wide = size + max(40, size*1.6)
 	}
 	wrap := ui.Box(c).Width(wide).Height(size + 16).AlignItems(ui.Start)
 	wrap.Children(func() {
-		if iconButton(c.Key("comments"), iconComment, size*0.9, color, "评论").Clicked() {
+		button := iconButton(c.Key("comments"), iconComment, size*0.9, color, "评论")
+		if cs.loaded {
+			button.Tooltip(fmt.Sprintf("%d 条评论", n))
+		}
+		if button.Clicked() {
 			a.npPane = paneComments
 			a.nowPlaying = true
 		}
-		if n > 0 {
+		if shown > 0 {
 			ui.Text(c.Key("comment-count"), commentBadge(n)).FontSize(max(10, size*0.46)).FontWeight(700).FontFeatures("tnum").
 				TextColor(color).Absolute().Top(-1).Left(8 + size*0.84).SingleLine().PassThrough()
 		}
