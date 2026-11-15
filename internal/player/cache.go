@@ -23,7 +23,7 @@ type Cache struct {
 	cond    *sync.Cond
 	dir     string // where the songs are, which the listener may move
 	limit   int64  // in bytes; 0 keeps nothing
-	fresh   map[string]struct{}
+	fresh   map[string]int
 	dirty   bool
 	waiting int
 	running bool
@@ -43,7 +43,7 @@ func setPruneHook(fn func()) {
 
 // NewCache returns a cache in dir of limit bytes.
 func NewCache(dir string, limit int64) *Cache {
-	c := &Cache{dir: dir, limit: limit, fresh: map[string]struct{}{}}
+	c := &Cache{dir: dir, limit: limit, fresh: map[string]int{}}
 	c.cond = sync.NewCond(&c.mu)
 	return c
 }
@@ -168,7 +168,8 @@ func (c *Cache) keeper(id int64, st *netease.Stream) (func(string, int64) (strin
 }
 
 func (c *Cache) settled(path string) {
-	if c.note(path, false) {
+	c.forget(path)
+	if c.kick() {
 		go c.pruneLoop()
 	}
 }
@@ -203,7 +204,7 @@ func (c *Cache) keep(id int64, st *netease.Stream, part string, n int64) (string
 		return part, false
 	}
 	os.WriteFile(filepath.Join(dir, key+".json"), meta, 0o600)
-	if c.kick(path) {
+	if c.kick() {
 		go c.pruneLoop()
 	}
 	return path, true
@@ -259,32 +260,25 @@ func (c *Cache) remove(path string) {
 
 func (c *Cache) protect(path string) {
 	c.mu.Lock()
-	c.fresh[path] = struct{}{}
+	c.fresh[path]++
 	c.mu.Unlock()
-}
-
-// kick queues path and reports whether this call must start the cleaner.
-func (c *Cache) kick(path string) bool {
-	return c.note(path, true)
 }
 
 func (c *Cache) forget(path string) {
 	c.mu.Lock()
-	delete(c.fresh, path)
+	if c.fresh[path] > 1 {
+		c.fresh[path]--
+	} else {
+		delete(c.fresh, path)
+	}
 	c.cond.Broadcast()
 	c.mu.Unlock()
 }
 
-// note protects path until playback opens it, or forgets that protection.
-// Either way the cleaner has new work, but only one cleaner runs.
-func (c *Cache) note(path string, keep bool) bool {
+// kick queues a clean and reports whether this call must start it.
+func (c *Cache) kick() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if keep {
-		c.fresh[path] = struct{}{}
-	} else {
-		delete(c.fresh, path)
-	}
 	c.dirty = true
 	c.cond.Broadcast()
 	if c.running {

@@ -497,6 +497,50 @@ func TestPruneWaitsWhileSongIsUnopened(t *testing.T) {
 	}
 }
 
+// Each overlapping hand-off owns its protection: opening one download or
+// failing another rename must not expose the still-unopened song to pruning.
+func TestPruneProtectsOverlappingHandOffs(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "opened", true: "rename-failed"}[failed], func(t *testing.T) {
+			dir := t.TempDir()
+			c := NewCache(dir, 1000)
+			st := &netease.Stream{Level: "exhigh", Type: "mp3"}
+			part := filepath.Join(dir, "first.part")
+			if err := os.WriteFile(part, make([]byte, 100), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			path, ok := c.keep(1, st, part, 100)
+			if !ok {
+				t.Fatal("first download was not kept")
+			}
+			part = filepath.Join(dir, "second.part")
+			if !failed {
+				if err := os.WriteFile(part, make([]byte, 100), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, ok = c.keep(1, st, part, 100)
+			if ok == failed {
+				t.Fatalf("second download kept = %v", ok)
+			}
+			if ok {
+				c.settled(path)
+			}
+			c.SetLimit(0)
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("unopened download lost its protection: %v", err)
+			}
+			f.Close()
+			c.settled(path)
+			c.SetLimit(0)
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("settled song was not pruned: %v", err)
+			}
+		})
+	}
+}
+
 // Leaving a radio keeps the song playing and those before it, drops those
 // it queued after, and asks it for no more.
 func TestEndRadio(t *testing.T) {
