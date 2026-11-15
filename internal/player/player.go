@@ -207,6 +207,8 @@ func (p *Player) ended() {
 		return
 	}
 	if p.repeat == RepeatOne {
+		// Each time round is a listen of its own, told as it ends.
+		p.heardGen = 0
 		p.out.Seek(0)
 		p.out.Play()
 		return
