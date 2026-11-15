@@ -47,46 +47,57 @@ func (a *app) npVolume(c *ui.Context, size float32, color, track, digits ui.Colo
 	})
 	row.Children(func() {
 		a.muteButton(c, color)
-		box := ui.Box(c).Width(slider).Height(16)
-		box.Children(func() {
-			s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Width(slider).Height(16).FocusRing(false).Label("音量")
-			if s.Changed() {
-				a.pl.SetVolume(a.volume)
-				moved()
+		a.volumeBar(c, "volume", slider, color, track, digits, &a.more.volumeAt, ui.Color{})
+	})
+}
+
+// volumeBar is a slim volume slider width wide. While it moves, or the wheel
+// turns it (which sets at), its percent shows over its middle, on back if
+// that is not clear, and fades after volumeShown.
+func (a *app) volumeBar(c *ui.Context, key string, width float32, color, track, digits ui.Color, at *time.Time, back ui.Color) {
+	now := c.Now()
+	box := ui.Box(c.Key(key)).Width(width).Height(16)
+	box.Children(func() {
+		s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Width(width).Height(16).FocusRing(false).Label("音量")
+		if s.Changed() {
+			a.pl.SetVolume(a.volume)
+			*at = now
+		}
+		pressed := s.Pressed()
+		hot := s.Hovered() || pressed
+		thick := float32(4)
+		if hot {
+			thick = 5
+		}
+		thick = s.AnimateTo("thick", thick, ui.Snappy)
+		v := float32(a.volume)
+		lamp := a.settings.NpLight
+		s.Draw(func(p *ui.Painter, r ui.Rect) {
+			y := r.Y + (r.H-thick)/2
+			p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: thick}, track, thick/2)
+			filled := ui.Rect{X: r.X, Y: y, W: max(thick, r.W*v), H: thick}
+			if lamp {
+				drawBarGlow(p, filled, y+thick/2, a.glowColor, a.glowGain())
 			}
-			pressed := s.Pressed()
-			hot := s.Hovered() || pressed
-			thick := float32(4)
-			if hot {
-				thick = 5
-			}
-			thick = s.AnimateTo("thick", thick, ui.Snappy)
-			v := float32(a.volume)
-			lamp := a.settings.NpLight
-			s.Draw(func(p *ui.Painter, r ui.Rect) {
-				y := r.Y + (r.H-thick)/2
-				p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: thick}, track, thick/2)
-				filled := ui.Rect{X: r.X, Y: y, W: max(thick, r.W*v), H: thick}
-				if lamp {
-					drawBarGlow(p, filled, y+thick/2, a.glowColor, a.glowGain())
-				}
-				p.Fill(filled, color, thick/2)
-			})
-			shown := pressed
-			if since := now.Sub(a.more.volumeAt); !a.more.volumeAt.IsZero() && since < volumeShown {
-				shown = true
+			p.Fill(filled, color, thick/2)
+		})
+		if pressed {
+			*at = now
+		}
+		fade := float32(0)
+		if since := now.Sub(*at); pressed || !at.IsZero() && since < volumeShown {
+			fade = 1
+			if !pressed {
 				c.After(volumeShown - since)
 			}
-			if pressed {
-				a.more.volumeAt = now
-			}
-			fade := float32(0)
-			if shown {
-				fade = 1
-			}
-			label := ui.Textf(c.Key("volume-percent"), "%d%%", int(a.volume*100+0.5)).FontSize(11).FontFeatures("tnum").
-				TextColor(digits).TextAlign(ui.Center).Absolute().Left(0).Right(0).Top(-17).PassThrough()
-			label.Opacity(label.AnimateTo("shown", fade, ui.Animation{Duration: 220 * time.Millisecond}))
-		})
+		}
+		label := ui.Textf(c.Key("volume-percent"), "%d%%", int(a.volume*100+0.5)).FontSize(11).FontFeatures("tnum").
+			TextColor(digits).TextAlign(ui.Center).Absolute().Top(-17).PassThrough()
+		if back.A > 0 {
+			label.Left(width/2-22).Width(44).Padding(1, 0).Radius(8).Background(back)
+		} else {
+			label.Left(0).Right(0)
+		}
+		label.Opacity(label.AnimateTo("shown", fade, ui.Animation{Duration: 220 * time.Millisecond}))
 	})
 }

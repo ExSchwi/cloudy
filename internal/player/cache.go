@@ -130,7 +130,7 @@ func (c *Cache) lookup(id int64, level string) (*download, *netease.Stream, bool
 func (c *Cache) download(id int64, st *netease.Stream) *download {
 	part := c.part(st)
 	if part == nil {
-		part, _ = os.CreateTemp("", "cloudy-stream-*.part")
+		part, _ = os.CreateTemp("", streamSpools)
 		return startDownload(st.URL, st.Size, part, nil, nil)
 	}
 	keep, settle := c.keeper(id, st)
@@ -370,10 +370,25 @@ func (c *Cache) removeOver(dir string, limit int64) {
 // by an app that quit as they came, untouched for longer than idle: one
 // coming in is written to every moment.
 func dropParts(dir string, idle time.Duration) {
+	dropPartsLike(dir, "*.part", idle)
+}
+
+// streamSpools is the name of the temporary files of songs the cache does
+// not keep, in the system's temporary folder.
+const streamSpools = "cloudy-stream-*.part"
+
+// DropStreamSpools removes the temporary files of songs streamed without
+// being kept that an app which crashed, or was killed, left behind: those
+// untouched for an hour. One still playing is in use, and stays.
+func DropStreamSpools() {
+	dropPartsLike(os.TempDir(), streamSpools, time.Hour)
+}
+
+func dropPartsLike(dir, pattern string, idle time.Duration) {
 	if dir == "" {
 		return
 	}
-	parts, _ := filepath.Glob(filepath.Join(dir, "*.part"))
+	parts, _ := filepath.Glob(filepath.Join(dir, pattern))
 	for _, path := range parts {
 		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > idle {
 			os.Remove(path)

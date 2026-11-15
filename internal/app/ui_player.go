@@ -503,8 +503,14 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 		bar.Left(0).Right(0).Bottom(0).Height(playerBarHeight).PaddingX(20)
 	}
 	bar.Children(func() {
-		// What plays.
-		ui.Row(c).Grow(1).Basis(0).MinWidth(150).Opacity(foreground).Children(func() {
+		// What plays. Its title comes before the heart's and the comments'
+		// counts: narrower, the counts go, then the comments' button (Now
+		// Playing has both), so that the title keeps room to read.
+		now := ui.Row(c.Key("bar-now")).Grow(1).Basis(0).MinWidth(150).Opacity(foreground)
+		nowW := now.LayoutBounds().W
+		counts := nowW == 0 || nowW >= barRoomCounts
+		comments := nowW == 0 || nowW >= barRoomComments
+		now.Children(func() {
 			if tr == nil {
 				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 					ui.Box(c).Size(48, 48).Radius(cover).Background(p.hover).Center().Children(func() {
@@ -538,8 +544,8 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 					}
 				})
 				ui.Column(c).Shrink(1).MinWidth(0).Gap(3).Children(func() {
-					title := ui.Text(c.Key(tr.ID), tr.Name).FontSize(13.5).FontWeight(600).SingleLine().
-						Transition(ui.ElementTransition{Animation: &motionPane, Enter: &ui.Motion{Y: 10}, Exit: &ui.Motion{Y: -10}})
+					line, title := a.marqueeLine(c.Key(tr.ID), "bar-title", tr.Name, 13.5, 600, 0)
+					line.Transition(ui.ElementTransition{Animation: &motionPane, Enter: &ui.Motion{Y: 10}, Exit: &ui.Motion{Y: -10}})
 					a.barSpot.title = title.LayoutBounds()
 					a.lifted(title)
 					// What it is waiting on shows in place of the artists.
@@ -563,8 +569,18 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 			if info.Clicked() {
 				a.nowPlaying = true
 			}
-			a.likeCountButton(c.Key("like"), tr, 16, muted).Margin(0, 0, 0, 4).Shrink(0)
-			a.barCommentButton(c.Key("comment-count"), tr, 16, muted).Margin(0, 0, 0, -6).Shrink(0)
+			if counts {
+				a.likeCountButton(c.Key("like"), tr, 16, muted).Margin(0, 0, 0, 4).Shrink(0)
+			} else {
+				a.heartButton(c.Key("like"), tr, 16, muted, a.heartRed(), iconHeart, iconHeartFill).Margin(0, 0, 0, 4).Shrink(0)
+			}
+			if comments {
+				pull := float32(0)
+				if counts {
+					pull = -6 // the heart's count leaves room at its right
+				}
+				a.barCommentButton(c.Key("comment-count"), tr, 16, muted, counts).Margin(0, 0, 0, pull).Shrink(0)
+			}
 		})
 
 		// Controls over the progress.
@@ -635,3 +651,11 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 		})
 	})
 }
+
+// How wide what plays in the bar has to be for the heart's and the
+// comments' counts (the cover, 160 of title, and both with their counts),
+// and for the comments' button at all (the cover, 120 of title, two icons).
+const (
+	barRoomCounts   = 60 + 160 + 64 + 56
+	barRoomComments = 60 + 120 + 32 + 32
+)

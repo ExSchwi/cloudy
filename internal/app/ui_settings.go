@@ -557,8 +557,8 @@ func (a *app) settingsAccountPage(k *settingsKit) {
 			})
 			return
 		}
-		k.rowOf(settingRow{label: "计入网易云听歌记录", desc: "使用未公开的接口，有一定账号风险",
-			tip: "听完或听满 30 秒的歌会计入账号的听歌时长和排行；这是网易云未公开的接口，非官方客户端使用存在一定账号风险，默认关闭", warn: true}, func() {
+		k.rowOf(settingRow{label: "计入网易云听歌记录", desc: "以网易云 Mac 客户端的身份上报，理论上有账号风险，社区暂无封号案例",
+			tip: "听完或听满 30 秒的歌会计入最近播放、听歌排行和累计听歌，网易云几分钟后才显示。这是网易云未公开的接口，以官方 Mac 客户端的身份发送：理论上存在账号风险，目前社区里还没有因此被封号的案例；网易云也可能随时不再计入。默认关闭", warn: true}, func() {
 			k.toggle("scrobble", "计入网易云听歌记录", &s.Scrobble, a.profile == nil, nil)
 		})
 	})
@@ -1139,7 +1139,7 @@ func (a *app) settingsAboutPage(k *settingsKit) {
 			})
 			// Installing in the background goes with the checks,
 			// which find what it installs.
-			k.sub("自动安装更新", "在后台下载并装好新版本，不弹窗，下次打开软件时生效", s.UpdateChecks, func() {
+			k.sub("自动安装更新", "后台发现新版本时直接装好，下次打开软件时生效；手动检查仍会先问你", s.UpdateChecks, func() {
 				k.toggle("update-downloads", "自动安装更新", &s.UpdateInstall, false, nil)
 			})
 			k.row("当前版本 "+mygo.App.Version(), "新版本来自 GitHub 的 nya-owo/cloudy", func() {
