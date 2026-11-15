@@ -623,9 +623,6 @@ func (a *app) playerBar(c *ui.Context, foreground float32) {
 				if deskBtn.Clicked() {
 					a.toggleDeskLyrics()
 				}
-				if iconButton(c.Key("mini"), iconMiniWin, 16, muted, "迷你窗口").Clicked() {
-					a.showMini()
-				}
 			}
 			// The song's translation under each line of its lyrics, lit
 			// while it shows: Now Playing's and the desktop lyrics'.

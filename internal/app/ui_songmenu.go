@@ -160,7 +160,6 @@ func (a *app) compactPlayerActions(tr *netease.Track) []menuAction {
 	actions := []menuAction{
 		{label: "播放模式", icon: modeIcon(a.pl.Mode()), note: a.pl.Mode().Name(), sub: [][]menuAction{modes}},
 		{label: "桌面歌词", icon: iconSubtitles, checked: a.settings.DeskLyrics, do: a.toggleDeskLyrics},
-		{label: "迷你窗口", icon: iconMiniWin, do: a.showMini},
 	}
 	// Signed in, the song actions already have the playlist submenu.
 	if a.profile == nil && tr.ProgramID == 0 && tr.ID > 0 {

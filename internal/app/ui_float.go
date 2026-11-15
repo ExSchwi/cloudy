@@ -646,7 +646,13 @@ func (a *app) makeMini() {
 
 // showMini puts the player in its small window, in place of the main one: the
 // bar goes there, and the window around it fades.
+var onShowMini, onCloseMini func(*app)
+
 func (a *app) showMini() {
+	if onShowMini != nil {
+		onShowMini(a)
+		return
+	}
 	if a.win == nil || a.morph.win != nil {
 		return
 	}
@@ -660,6 +666,10 @@ func (a *app) showMini() {
 
 // closeMini goes back to the main window: the small one goes back into its bar.
 func (a *app) closeMini() {
+	if onCloseMini != nil {
+		onCloseMini(a)
+		return
+	}
 	if a.morph.win != nil {
 		return
 	}
