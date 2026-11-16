@@ -652,6 +652,17 @@ func (a *app) settingsLyricsPage(k *settingsKit) {
 		k.sub("回弹强度", "调节切换到下一句时的回弹幅度，0% 为平滑滚动", s.LyricPerspective, func() {
 			a.settingSlider(k.c.Key("lyric-bounce"), "回弹强度", &s.LyricBounce, s.LyricPerspective, k.ink)
 		})
+		k.row("其他来源逐字歌词", "网易云只有逐行歌词时，从 AMLL 歌词库或酷狗找逐字歌词，让歌词按实际唱的速度亮起", func() {
+			k.toggle("more-words", "其他来源逐字歌词", &s.MoreWords, false, func() { moreWordsOn.Store(s.MoreWords) })
+		})
+		k.row("模糊其余歌词", "只有正在唱的一句清晰，离得越远越模糊；省电模式下不模糊", func() {
+			k.toggle("lyric-blur", "模糊其余歌词", &s.LyricBlur, false, nil)
+		})
+		// Only while some lyrics blur: the perspective ones always do.
+		blurs := s.LyricBlur || s.LyricPerspective
+		k.sub("模糊强度", "0% 为不模糊，50% 为默认强度；透视歌词和模糊其余歌词都按这个强度", blurs, func() {
+			a.settingSlider(k.c.Key("lyric-blur-level"), "模糊强度", &s.LyricBlurLevel, blurs, k.ink)
+		})
 		k.row("歌词翻译", "在歌词下方显示翻译；播放栏的翻译按钮也能切换", func() {
 			k.toggle("lyric-trans", "歌词翻译", &s.LyricTrans, false, nil)
 		})
@@ -914,6 +925,9 @@ func (a *app) settingsEffectsPage(k *settingsKit) {
 		})
 	})
 	k.group("播放页", func() {
+		k.row("空闲时隐藏控件", "鼠标静止 3 秒或移出窗口后，只留下封面、歌名、进度和播放键；动一下鼠标或点一下就回来", func() {
+			k.toggle("np-calm", "播放页空闲时隐藏控件", &s.NpCalm, false, nil)
+		})
 		k.row("微光", "当前歌词、进度条与音量带一层柔和的微光", func() {
 			effect("np-light", "播放页微光", &s.NpLight)
 		})
@@ -925,6 +939,7 @@ func (a *app) settingsEffectsPage(k *settingsKit) {
 			effect("smoke", "进度条烟雾特效", &s.Smoke)
 		})
 	})
+	a.deckSettings(k)
 	k.group("界面", func() {
 		k.row("界面动画", "精简时只保留淡入淡出", func() {
 			modes := []string{"", "lite", "off"}

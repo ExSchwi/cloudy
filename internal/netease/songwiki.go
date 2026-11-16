@@ -10,20 +10,27 @@ import (
 // in, a review, what the listener's own history with it is, and songs and
 // playlists like it. Many songs have only some of it, or none.
 type SongWiki struct {
-	Facts     []WikiFact
-	Awards    []WikiLine
-	Shows     []string
-	Sheets    int // how many scores NetEase has of it
-	Review    *WikiReview
-	Memory    []WikiLine
-	Similar   []WikiSong
-	Playlists []WikiPlaylist
+	Album       *WikiSong // the album it is on, its cover the album's
+	Intro       string    // what the wiki says of its making
+	Credits     []WikiCredit
+	AlbumAwards []WikiLine
+	Artists     []WikiArtist
+	Versions    []WikiSong // other recordings and covers of it
+	Facts       []WikiFact
+	Awards      []WikiLine
+	Shows       []string
+	Sheets      int // how many scores NetEase has of it
+	Review      *WikiReview
+	Memory      []WikiLine
+	Similar     []WikiSong
+	Playlists   []WikiPlaylist
 }
 
 // Empty reports whether the wiki says nothing of its song.
 func (w *SongWiki) Empty() bool {
 	return w == nil || len(w.Facts) == 0 && len(w.Awards) == 0 && len(w.Shows) == 0 && w.Sheets == 0 &&
-		w.Review == nil && len(w.Memory) == 0 && len(w.Similar) == 0 && len(w.Playlists) == 0
+		w.Review == nil && len(w.Memory) == 0 && len(w.Similar) == 0 && len(w.Playlists) == 0 &&
+		w.Album == nil && w.Intro == "" && len(w.Credits) == 0 && len(w.Artists) == 0 && len(w.Versions) == 0
 }
 
 // A WikiFact is one fact with its values: 曲风 and its genres, 语种 and
@@ -110,6 +117,41 @@ type wikiResource struct {
 	ResourceType string      `json:"resourceType"`
 	ResourceID   string      `json:"resourceId"`
 	UIElement    wikiElement `json:"uiElement"`
+	// ResourceExt holds what the moments of the listener's history say:
+	// their titles alone are only the labels.
+	ResourceExt struct {
+		FirstListen *struct {
+			Date   string `json:"date"`
+			Season string `json:"season"`
+			Period string `json:"period"`
+		} `json:"musicFirstListenDto"`
+		TotalPlay *struct {
+			PlayCount int    `json:"playCount"`
+			Text      string `json:"text"`
+		} `json:"musicTotalPlayDto"`
+	} `json:"resourceExt"`
+}
+
+// memoryDetail says what a moment of the listener's history holds, or
+// "" when NetEase sent nothing to say.
+func (r wikiResource) memoryDetail() string {
+	ext := r.ResourceExt
+	switch {
+	case ext.FirstListen != nil && strings.TrimSpace(ext.FirstListen.Date) != "":
+		f := ext.FirstListen
+		d := strings.TrimSpace(f.Date)
+		if f.Season != "" || f.Period != "" {
+			d += " · " + f.Season + f.Period
+		}
+		return d
+	case ext.TotalPlay != nil && ext.TotalPlay.PlayCount > 0:
+		d := strconv.Itoa(ext.TotalPlay.PlayCount) + " 次"
+		if t := strings.TrimSpace(ext.TotalPlay.Text); t != "" {
+			d += " · " + t
+		}
+		return d
+	}
+	return ""
 }
 
 type wikiCreative struct {
@@ -129,12 +171,31 @@ type wikiPage struct {
 }
 
 // SongWikiOf returns the wiki of song id.
+// It asks for both of NetEase's wikis at once: the player's 音乐百科, which
+// has the listener's history with the song and covers of the songs like it,
+// and the 歌曲百科, which has more of the song. Either alone will do.
 func SongWikiOf(id int64) (*SongWiki, error) {
+	infoDone := make(chan struct{})
+	var info *wikiInfoPage
+	var infoErr error
+	go func() {
+		defer close(infoDone)
+		info, infoErr = songWikiInfo(id)
+	}()
 	var res wikiPage
-	if err := eapiPost("/api/song/play/about/block/page", map[string]any{"songId": strconv.FormatInt(id, 10)}, &res); err != nil {
+	err := eapiPost("/api/song/play/about/block/page", map[string]any{"songId": strconv.FormatInt(id, 10)}, &res)
+	<-infoDone
+	if err != nil && infoErr != nil {
 		return nil, err
 	}
-	return parseSongWiki(&res), nil
+	w := &SongWiki{}
+	if err == nil {
+		w = parseSongWiki(&res)
+	}
+	if infoErr == nil {
+		w.addInfo(info)
+	}
+	return w, nil
 }
 
 func parseSongWiki(res *wikiPage) *SongWiki {
@@ -151,11 +212,17 @@ func parseSongWiki(res *wikiPage) *SongWiki {
 					w.Memory = append(w.Memory, WikiLine{t, c.UIElement.subtitles()})
 				}
 				for _, r := range c.Resources {
-					line := WikiLine{r.UIElement.title(), r.UIElement.subtitles()}
+					line := WikiLine{r.UIElement.title(), r.memoryDetail()}
+					if line.Detail == "" {
+						line.Detail = r.UIElement.subtitles()
+					}
 					if line.Detail == "" {
 						line.Detail = r.UIElement.description()
 					}
-					if line.Title != "" || line.Detail != "" {
+					// A label with nothing under it reads as a fact (a bare
+					// 第一次听 looked like this was the first time), so
+					// only moments with something to say are shown.
+					if line.Title != "" && line.Detail != "" {
 						w.Memory = append(w.Memory, line)
 					}
 				}

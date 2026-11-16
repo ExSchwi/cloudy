@@ -887,6 +887,21 @@ func (p *Player) loadAttempt(at, skipped int, play bool, from time.Duration, dir
 					p.lyricsLoaded = true
 				}
 			})
+			// Shown already, the lines are swapped for ones sung word by
+			// word if another source has them.
+			if wantsMoreWords(t, lines) {
+				if more := MoreWords(t); len(more) > 0 {
+					more = lyrics.KeepTranslations(more, lines)
+					p.post(func() {
+						if gen == p.gen {
+							p.lyrics = more
+							if p.Changed != nil {
+								p.Changed()
+							}
+						}
+					})
+				}
+			}
 		}()
 	}
 

@@ -336,6 +336,10 @@ func (a *app) load(r route) {
 		a.loadDownloads(false)
 	case pageRecent:
 		a.recent.sure = false
+	case pageWeek:
+		if len(a.week.songs) == 0 {
+			a.loadWeek()
+		}
 	case pageCloud:
 		a.loadCloud(false)
 	case pageLocal:
@@ -397,9 +401,13 @@ func (a *app) sidebar(c *ui.Context, foreground float32) {
 		}
 		a.searchField(c)
 
-		nav := ui.Box(c.Key("nav-box")).Grow(1).MinHeight(0).Margin(0, -6)
+		// The scroll reaches into the sidebar's margin at the right, as far
+		// as its bar is wide, the rows where they were: the bar, wider under
+		// the pointer, lay over the rows' ends, the section heads' ＋ and
+		// their hover.
+		nav := ui.Box(c.Key("nav-box")).Grow(1).MinHeight(0).Margin(0, -14, 0, -6)
 		nav.Children(func() {
-			nav := ui.Scroll(c.Key("nav")).TrackScroll(&a.navScroll).Fill().Padding(0, 6).Gap(4)
+			nav := ui.Scroll(c.Key("nav")).TrackScroll(&a.navScroll).Fill().Padding(0, 14, 0, 6).Gap(4)
 			top := easeRange(a.navScroll.Y, 0, 16)
 			bottom := easeRange(a.navScroll.MaxY-a.navScroll.Y, 0, 16)
 			if top > 0 || bottom > 0 {
@@ -653,6 +661,8 @@ func (a *app) content(c *ui.Context, foreground float32) {
 			a.localPage(c)
 		case pageStyle:
 			a.stylePage(c)
+		case pageWeek:
+			a.weekPage(c)
 		}
 	})
 }
@@ -678,6 +688,8 @@ func (a *app) loadHome() {
 	a.loadStyle()
 	a.radar.lists = nil
 	a.loadRadars()
+	a.week.songs = nil
+	a.loadWeek()
 	a.filteredPlaylists = [len(playlistFilters)]*playlistBrowseData{}
 	signedIn := a.profile != nil
 	at := time.Now()

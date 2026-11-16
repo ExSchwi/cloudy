@@ -30,6 +30,7 @@ const (
 	pageCloud
 	pageStyle // the day's songs in the styles picked
 	pageLocal // the listener's own music, in the folders they chose
+	pageWeek  // 本周听歌排行, the songs played most in the last seven days
 )
 
 type route struct {
@@ -154,7 +155,6 @@ type app struct {
 	npChangedAt  time.Time // when it last opened or closed
 	npPane       int       // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
 	npPaneTop    float32   // how far the cover beside the pane starts below its top
-	npRest       float32   // how tall what goes under the cover is, as last laid out
 	lyricScroll  ui.ScrollState
 	lyricGlide   lyricGlide
 	lyricWheel   float32   // the wheel over a lyric value, short of a step
@@ -260,6 +260,11 @@ type app struct {
 	sessionDue   bool   // a save of the session is due
 
 	style         styleState // the day's songs in the styles picked
+	deck          deckState  // the home page's calendar of the daily and style cards
+	week          weekState  // the songs played most in the last seven days
+	deckDrawer    bool       // the settings' drawer of what the calendar holds is open
+	deckSort      deckSort   // a page dragged to a new place in that drawer
+	queueAdding   bool       // the queue's drawer of playlists to add it to is open
 	radar         radarState // NetEase's radars on the home page
 	lyricDownload lyricDownloadState
 	progressAt    progressShown // what the taskbar button last showed of the song
@@ -369,6 +374,7 @@ func Run() error {
 		a.pl.PodcastSpeed = a.settings.PodcastSpeed
 		a.pl.SetEffects(a.currentEffects(), false)
 		a.pl.Quality = func() string { return a.settings.Quality }
+		a.useMoreWords()
 		a.pl.Normalize = func() bool { return a.settings.Normalize }
 		a.pl.Crossfade = a.crossfade
 		a.pl.Cache = newSongCache(a.settings.CacheFolder, a.settings.CacheMB)

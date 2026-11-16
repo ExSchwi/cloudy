@@ -51,6 +51,10 @@ func (a *app) npVolume(c *ui.Context, size float32, color, track, digits ui.Colo
 	})
 }
 
+// volumeTouch is how far over and under the volume's slider it can be
+// taken hold of.
+const volumeTouch = 8
+
 // volumeBar is a slim volume slider width wide. While it moves, or the wheel
 // turns it (which sets at), its percent shows over its middle, on back if
 // that is not clear, and fades after volumeShown.
@@ -58,18 +62,23 @@ func (a *app) volumeBar(c *ui.Context, key string, width float32, color, track, 
 	now := c.Now()
 	box := ui.Box(c.Key(key)).Width(width).Height(16)
 	box.Children(func() {
-		s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Width(width).Height(16).FocusRing(false).Label("音量")
+		// Taller than it draws, 8 more over and under, for a finger to
+		// find it on a touch screen; the hand says it can be dragged.
+		s := ui.SliderBase(c.Key("volume"), &a.volume, 0, 1).Width(width).Height(16 + 2*volumeTouch).Absolute().Top(-volumeTouch).Left(0).
+			FocusRing(false).Label("音量").Cursor(ui.CursorPointer)
 		if s.Changed() {
 			a.pl.SetVolume(a.volume)
 			*at = now
 		}
 		pressed := s.Pressed()
 		hot := s.Hovered() || pressed
-		thick := float32(4)
+		thick, knob := float32(4), float32(0)
 		if hot {
-			thick = 5
+			// As the progress does: thicker, with its knob.
+			thick, knob = 6, 1
 		}
 		thick = s.AnimateTo("thick", thick, ui.Snappy)
+		knob = s.AnimateTo("knob", knob, ui.Snappy)
 		v := float32(a.volume)
 		lamp := a.settings.NpLight
 		s.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -80,6 +89,12 @@ func (a *app) volumeBar(c *ui.Context, key string, width float32, color, track, 
 				drawBarGlow(p, filled, y+thick/2, a.glowColor, a.glowGain())
 			}
 			p.Fill(filled, color, thick/2)
+			if knob > 0.01 {
+				k := 12 * knob
+				head, cy := r.X+r.W*v, r.Y+r.H/2
+				p.Shadow(ui.Rect{X: head - k/2, Y: cy - k/2, W: k, H: k}, k/2, 0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.3))
+				p.Fill(ui.Rect{X: head - k/2, Y: cy - k/2, W: k, H: k}, color, k/2)
+			}
 		})
 		if pressed {
 			*at = now

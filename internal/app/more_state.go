@@ -8,6 +8,7 @@ import (
 
 // moreState holds what 1.2.13's additions keep between frames.
 type moreState struct {
+	npCalm npCalmState // how long Now Playing has been left alone
 	// queue is the queue's popover over the player bar.
 	queue struct {
 		open bool

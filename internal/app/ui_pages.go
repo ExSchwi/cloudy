@@ -60,7 +60,7 @@ func (a *app) homePage(c *ui.Context) {
 			a.homeSkeleton(c, a.pageShimmer(c))
 			return
 		}
-		a.dailyCard(c, now)
+		a.homeDeck(c, now)
 
 		if len(a.recPlaylists) > 0 {
 			a.section(c, "今日为你推荐")
