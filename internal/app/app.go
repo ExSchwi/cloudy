@@ -395,6 +395,8 @@ func Run() error {
 			a.autoFollow()
 			a.syncCaptions()
 			a.syncThumbs()
+			// 暂停后的桌面歌词已停止定时刷新，恢复播放时需唤醒其他窗口。
+			a.redraw()
 		}
 		a.volume = a.settings.Volume
 		a.pl.SetVolume(a.volume)
