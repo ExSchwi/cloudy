@@ -166,7 +166,13 @@ func npFade(e ui.Element, calm float32) ui.Element {
 // calm.
 func (a *app) npFold(c *ui.Context, key string, calm float32, body func()) {
 	st := &a.more.npCalm
-	outer := npFade(ui.Box(c.Key(key)).ClipY(), npCalmFade(calm))
+	outer := npFade(ui.Box(c.Key(key)), npCalmFade(calm))
+	if calm > 0 {
+		// Clipped only as it folds: awake, what stands out of it shows
+		// whole, as the volume's percent over its slider and the
+		// quality's badge, taller than its row.
+		outer.ClipY()
+	}
 	if h := st.folded[key]; calm > 0 && h > 0 {
 		outer.MaxHeight(h * (1 - npCalmLay(calm)))
 	}

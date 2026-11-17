@@ -606,19 +606,7 @@ func (a *app) deckSettings(k *settingsKit) {
 			if open {
 				label = "收起"
 			}
-			b := ui.ButtonBase(c.Key("deck-manage")).Height(32).PaddingX(14).Gap(6).Radius(999).AlignItems(ui.Center).Shrink(0).
-				FocusRing(false).Role(ui.RoleDisclosure).Label(label + "台历内容")
-			b.Expanded(open)
-			bg := k.ink.hover
-			if b.Hovered() {
-				bg = k.ink.press
-			}
-			b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond})).Border(0.5, k.ink.line).TextColor(k.ink.text)
-			b.Children(func() {
-				ui.Text(c, label).FontSize(13.5).FontWeight(500).SingleLine()
-				ui.Icon(c, iconDown).Size(13, 13).TextColor(k.ink.muted).Rotate(b.AnimateTo("turn", 180*b2f(open), motionFast))
-			})
-			if b.Clicked() {
+			if k.disclosure("deck-manage", label+"台历内容", open).Clicked() {
 				a.deckDrawer = !open
 			}
 		})

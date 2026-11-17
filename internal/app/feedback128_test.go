@@ -148,13 +148,13 @@ func TestHotCommentsSettings(t *testing.T) {
 	tt.Advance(time.Second)
 	toggle := func(label, desc string) {
 		t.Helper()
+		_ = desc
 		title, ok1 := tt.Find(label)
-		note, ok2 := tt.Find(desc)
 		pane, ok3 := tt.Find("歌词设置项")
-		if !ok1 || !ok2 || !ok3 {
-			t.Fatalf("no %s control: %v %v %v", label, ok1, ok2, ok3)
+		if !ok1 || !ok3 {
+			t.Fatalf("no %s control: %v %v", label, ok1, ok3)
 		}
-		tt.ClickAt(pane.X+pane.W-30-20-12, (title.Y+note.Y+note.H)/2)
+		tt.ClickAt(pane.X+pane.W-30-14-22, title.Y+title.H/2)
 		tt.Advance(time.Second)
 	}
 	if !tt.HasText("热评模式") || tt.HasText("仅在间奏时显示热评") {

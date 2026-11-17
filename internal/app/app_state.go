@@ -83,4 +83,7 @@ type settingsView struct {
 	accentDraft  accentPick // the color well open, and the color it shows
 	fontPick     fontPicker // the dialog of the system's fonts
 	confirmGlass bool       // asking before enabling global liquid glass
+	materialOpen bool       // the parts of the material show, to set each
+	thumbs       map[string]*sceneThumb // the backdrops' pictures on their cards
+	preview      npPreview              // Now Playing in small, at the head of its page
 }

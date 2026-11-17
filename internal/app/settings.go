@@ -182,6 +182,13 @@ type settings struct {
 	// rising and swelling with the bass: an experiment the listener turns
 	// on.
 	Fog bool `json:"fog"`
+	// FogStyle is the scene of that backdrop (backdropScenes): the fog
+	// itself when empty, "bokeh", "aurora" or "stars".
+	FogStyle string `json:"fogStyle,omitempty"`
+	// SceneCover are the scenes of the backdrop, by id, that paint in the
+	// cover's color in place of their own (sceneTints): a pool's
+	// blue-green, an aurora's green. Each is set by itself.
+	SceneCover map[string]bool `json:"sceneCover,omitempty"`
 	// AppIcon is where the app's icon shows on macOS (appIcons); elsewhere
 	// it is always in the notification area.
 	AppIcon string `json:"appIcon"`

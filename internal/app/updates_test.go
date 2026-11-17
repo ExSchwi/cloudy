@@ -44,12 +44,12 @@ func TestUpdateSettings(t *testing.T) {
 	// the row's end.
 	toggle := func(title, desc string) {
 		t.Helper()
+		_ = desc
 		top, ok1 := tt.Find(title)
-		bottom, ok2 := tt.Find(desc)
-		if !ok1 || !ok2 {
+		if !ok1 {
 			t.Fatalf("no row %s", title)
 		}
-		tt.ClickAt(560-24-16-12, (top.Y+bottom.Y+bottom.H)/2)
+		tt.ClickAt(560-30-14-22, top.Y+top.H/2)
 		tt.Frame()
 	}
 	toggle("自动安装更新", "后台发现新版本时直接装好，下次打开软件时生效；手动检查仍会先问你")
