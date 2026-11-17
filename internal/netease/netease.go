@@ -684,6 +684,9 @@ func Lyrics(id int64) (lrc, translation, yrc string, err error) {
 		Yrc struct {
 			Lyric string `json:"lyric"`
 		} `json:"yrc"`
+		Ytlrc struct {
+			Lyric string `json:"lyric"`
+		} `json:"ytlrc"`
 	}
 	data := map[string]any{"id": strconv.FormatInt(id, 10), "cp": false, "tv": 0, "lv": 0, "rv": 0, "kv": 0, "yv": 0, "ytv": 0, "yrv": 0}
 	if eapiPost("/api/song/lyric/v1", data, &words) == nil {
@@ -695,6 +698,11 @@ func Lyrics(id int64) (lrc, translation, yrc string, err error) {
 	}
 	if translation == "" {
 		translation = words.Tlyric.Lyric
+	}
+	// Word-timed lines can have different times from the ordinary LRC;
+	// use the translation paired with them when both are available.
+	if yrc != "" && words.Ytlrc.Lyric != "" {
+		translation = words.Ytlrc.Lyric
 	}
 	return lrc, translation, yrc, nil
 }
