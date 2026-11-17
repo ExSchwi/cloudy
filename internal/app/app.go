@@ -211,6 +211,7 @@ type app struct {
 	morph                 floatMorph       // the player on its way to or from it
 	deskBtn               ui.Rect          // the player bar's button of the desktop lyrics, while it shows
 	deskFly               deskFlight       // the desktop lyrics on their way out of it or back
+	deskLineAt            ui.Rect          // where the desktop lyrics laid out their line last
 	sleep                 sleepState       // the timer that pauses the music
 	keys                  shortcutState    // the global keys and the menu keys
 	spin                  discState        // how far the bar's cover has turned
