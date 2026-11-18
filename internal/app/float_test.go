@@ -96,3 +96,26 @@ func TestMiniCoverHoverAndRestore(t *testing.T) {
 		})
 	}
 }
+
+// The mini window's button sits left of the settings in the top bar, at
+// any width (PR #11), and opens the mini window.
+func TestTopBarMiniButton(t *testing.T) {
+	orig := onShowMini
+	defer func() { onShowMini = orig }()
+	for _, width := range []int{880, 1440} {
+		a := playerBarLayoutApp()
+		opened := 0
+		onShowMini = func(*app) { opened++ }
+		tt := playerBarTester(a, width)
+		// The top bar is built before the player bar, whose button this is not.
+		mini, _ := tt.Find("迷你窗口")
+		settings := barElement(t, tt, "设置")
+		if mini.W == 0 || mini.Y > 60 || mini.X+mini.W > settings.X {
+			t.Fatalf("%d: no mini button left of settings in the top bar: mini=%+v settings=%+v", width, mini, settings)
+		}
+		tt.ClickAt(mini.X+mini.W/2, mini.Y+mini.H/2)
+		if opened != 1 {
+			t.Fatalf("%d: clicking it opened the mini window %d times", width, opened)
+		}
+	}
+}

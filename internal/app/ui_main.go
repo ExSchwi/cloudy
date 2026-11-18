@@ -583,8 +583,12 @@ func (a *app) pageTop(c *ui.Context, foreground float32) {
 			Material(glass.ScrollEdge{Hard: true, Background: a.pal.bg})
 		edge.Opacity(edgeShown(edge, a.underTop))
 	}
-	// The settings, left of the window's own buttons, where apps keep them.
-	ui.Row(c.Key("top-settings")).Absolute().Top(0).Right(c.TitleBar().Right + 10).Height(topBar(c)).AlignItems(ui.Center).Opacity(foreground).Children(func() {
+	// The settings, left of the window's own buttons, where apps keep them;
+	// the mini window beside them, at any width (PR #11, kept in 1.3.2).
+	ui.Row(c.Key("top-settings")).Absolute().Top(0).Right(c.TitleBar().Right + 10).Height(topBar(c)).Gap(4).AlignItems(ui.Center).Opacity(foreground).Children(func() {
+		if iconButton(c.Key("mini"), iconMiniWin, 17, a.pal.muted, "迷你窗口").Clicked() {
+			a.showMini()
+		}
 		if iconButton(c.Key("settings"), iconSettings, 17, a.pal.muted, "设置").Clicked() {
 			a.openSettings()
 		}

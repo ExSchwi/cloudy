@@ -427,11 +427,9 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 	}
 	rowAt := func(i int) {
 		if i == 0 {
-			head := ui.Column(c)
-			if a.more.slideX != 0 {
-				// An album opening or closing: the head comes in with the rows.
-				a.albumSlideIn(c, head)
-			}
+			// An album opening or closing: the head comes in with the rows.
+			head := ui.Column(c.Key(listView{album: a.plView.album}))
+			a.albumHeadIn(c, head)
 			head.Children(func() {
 				a.startMark(c)
 				header(c)
@@ -574,14 +572,12 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 	}
 	// The header stays as the rows under it switch between the songs and
 	// the grid, those coming sliding in from the side of their button.
-	// An album opened is a list of its own (ui_album_open.go): the albums'
-	// come back as they were, built anew from the state kept.
-	list := ui.List(c.Key(listKey{a.route, a.plView.album}), &a.trackList, rows, func(i int) {
+	list := ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
 		if i == 0 {
 			rowAt(0)
 			return
 		}
-		view := ui.Column(c.Key(listView{grid}))
+		view := ui.Column(c.Key(listView{grid, a.plView.album}))
 		a.slideIn(c, view, grid)
 		view.Children(func() {
 			if !grid {
@@ -608,8 +604,12 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 	a.listFloats(c, listBottom, grid)
 }
 
-// listView keys the rows of a list apart as songs or as a grid of albums.
-type listView struct{ grid bool }
+// listView keys the rows of a list apart as songs or as a grid of albums,
+// and as the songs of an album opened.
+type listView struct {
+	grid  bool
+	album string // the album opened (ui_album_open.go), or ""
+}
 
 // nowPlayingBars dance in the row of the track playing.
 func (a *app) nowPlayingBars(c *ui.Context) {

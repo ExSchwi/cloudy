@@ -55,6 +55,10 @@ type albumMove struct {
 }
 
 // albumMoved opens or closes the album asked for, before the list builds.
+// The list stays the same, its rows' contents keyed by the album
+// (listView), so that the new come in over the old as a transition does,
+// as the list and the grid switch; the albums come back scrolled to the
+// row they showed at the top.
 func (a *app) albumMoved(now time.Time) {
 	v := &a.plView
 	m := v.move
@@ -66,12 +70,16 @@ func (a *app) albumMoved(now time.Time) {
 	case m.key == v.album:
 	case m.key != "":
 		if v.album == "" {
-			// The albums as they are, to come back to.
-			saved := a.trackList
-			v.saved = &saved
+			// The albums as they show, to come back to: the first row the
+			// list counts is under the bar over it, the next at its top.
+			if first, _ := a.trackList.Visible(); first > 0 {
+				v.backRow = first + 1
+			} else {
+				v.backRow = 0
+			}
 		}
 		v.album = m.key
-		a.trackList = ui.ListState{}
+		a.trackList.ScrollTo(0, ui.Start)
 		a.albumSlide(48, now)
 		if m.cover != "" && m.from.W > 0 && a.motion == motionFull {
 			a.flight = coverFlight{url: m.cover, from: m.from, rFrom: 14}
@@ -79,11 +87,8 @@ func (a *app) albumMoved(now time.Time) {
 	default:
 		g, open := a.albumOpen()
 		v.album = ""
-		if v.saved != nil {
-			a.trackList, v.saved = *v.saved, nil
-		} else {
-			a.trackList = ui.ListState{}
-		}
+		a.trackList.ScrollTo(max(0, v.backRow), ui.Start)
+		v.backRow = 0
 		a.albumSlide(-48, now)
 		if open && g.cover != "" && a.motion == motionFull && m.from.W > 0 {
 			a.flight = coverFlight{url: g.cover, from: m.from, rTo: 14, back: true}
@@ -97,22 +102,14 @@ func (a *app) albumSlide(dx float32, now time.Time) {
 	a.more.switchedAt, a.more.slideX = now, dx
 }
 
-// albumSlideIn slides e, a row of the list as an album opens or closes, in
-// from the side, fading in, by the time since: the list is built anew
-// then, and its rows have no frame before to go in from, as a transition
-// needs (going back to the albums showed them at once, the user, 1.3.2).
-func (a *app) albumSlideIn(c *ui.Context, e ui.Element) {
-	t := float32(c.Now().Sub(a.more.switchedAt)) / float32(albumSlideTime)
-	if a.motion == motionOff || t < 0 || t >= 1 {
+// albumHeadIn has e, the head of the list, come in as the rows do while an
+// album opens or closes.
+func (a *app) albumHeadIn(c *ui.Context, e ui.Element) {
+	if a.motion == motionOff || a.more.slideX == 0 || c.Now().Sub(a.more.switchedAt) > 600*time.Millisecond {
 		return
 	}
-	k := 1 - (1-t)*(1-t)*(1-t)
-	e.Translate(a.more.slideX*(1-k), 0).Opacity(0.2 + 0.8*k)
-	c.AnimationFrame()
+	e.Transition(ui.ElementTransition{Animation: &viewSlide, Enter: &ui.Motion{X: a.more.slideX}})
 }
-
-// albumSlideTime is how long the rows take to slide in.
-const albumSlideTime = 420 * time.Millisecond
 
 // albumHead heads the album open: back to the albums, its cover, name and
 // what it holds, and what plays it.
@@ -159,11 +156,4 @@ func (a *app) albumHead(c *ui.Context, g albumGroup, tracks []netease.Track) {
 			})
 		})
 	})
-}
-
-// listKey keys the list of songs of a page apart from that of an album of
-// it opened.
-type listKey struct {
-	route route
-	album string
 }

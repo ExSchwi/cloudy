@@ -35,9 +35,9 @@ type plView struct {
 	// The album index: whether it is open, and what it is searched for.
 	indexOpen  bool
 	indexQuery string
-	// saved is the list of the albums as it was when one opened, to go
+	// backRow is the row the albums showed at the top as one opened, to go
 	// back to (ui_album_open.go).
-	saved *ui.ListState
+	backRow int
 	// move is an album to open or close as the list builds next.
 	move *albumMove
 }
@@ -176,7 +176,10 @@ func (a *app) listShown(tracks []netease.Track) []netease.Track {
 	}
 	q := strings.ToLower(strings.TrimSpace(v.query))
 	if len(tracks) == 0 || q == "" && v.sort == 0 {
-		v.groups, v.all = nil, nil
+		// What was sorted before goes with its groups: sorted by album
+		// again, it was found here without them, and the switch and the
+		// album index were gone (the user, 1.3.2-test.4).
+		v.groups, v.all, v.matched = nil, nil, false
 		return tracks
 	}
 	if v.matched && v.of == &tracks[0] && v.n == len(tracks) && v.asked == q && v.sorted == v.sort && v.only == v.album {

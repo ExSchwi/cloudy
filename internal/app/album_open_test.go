@@ -80,3 +80,23 @@ func TestAlbumOpensAndComesBack(t *testing.T) {
 
 // timeZero is a zero time, for tests that move an album outside a frame.
 var timeZero time.Time
+
+// Sorted by album, then by default, then by album again, the albums are
+// found again: the switch and the album index stay.
+func TestAlbumSortAgain(t *testing.T) {
+	a := newTestApp()
+	a.route = route{page: pageDownloads}
+	song := func(name, album string) netease.Track {
+		return netease.Track{Name: name, Album: netease.Album{Name: album}, Artists: []netease.Artist{{Name: "r"}}}
+	}
+	tracks := []netease.Track{song("1", "X"), song("2", "Y"), song("3", "X")}
+	a.listShown(tracks)
+	v := &a.plView
+	for _, sort := range []int{sortAlbum, 0, sortAlbum} {
+		v.sort = sort
+		a.listShown(tracks)
+	}
+	if len(v.all) != 2 || len(v.groups) != 2 {
+		t.Fatalf("by album again: %d albums, %d groups", len(v.all), len(v.groups))
+	}
+}

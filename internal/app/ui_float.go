@@ -654,9 +654,16 @@ func (a *app) makeMini() {
 	}
 }
 
+// onShowMini, when set, stands in for showMini, for the tests.
+var onShowMini func(*app)
+
 // showMini puts the player in its small window, in place of the main one: the
 // bar goes there, and the window around it fades.
 func (a *app) showMini() {
+	if onShowMini != nil {
+		onShowMini(a)
+		return
+	}
 	if a.win == nil || a.morph.win != nil {
 		return
 	}

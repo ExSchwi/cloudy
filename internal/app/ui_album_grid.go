@@ -75,8 +75,8 @@ func (a *app) slideIn(c *ui.Context, e ui.Element, grid bool) {
 		dx = -56
 	}
 	if a.more.slideX != 0 {
-		a.albumSlideIn(c, e)
-		return
+		// An album opening, or closing (albumSlide).
+		dx = a.more.slideX
 	}
 	e.Transition(ui.ElementTransition{Animation: &viewSlide, Enter: &ui.Motion{X: dx}})
 }
