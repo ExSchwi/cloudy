@@ -297,6 +297,11 @@ func (a *app) settingsLyricsPage(k *settingsKit) {
 		})
 	})
 	k.foot("逐字高亮关闭后整行一起亮起。网易云只有逐行歌词时，可以从 AMLL 歌词库或酷狗找逐字歌词。热评模式把歌词换成这首歌的热门评论。")
+	k.group("律动歌词", func() {
+		k.row("高清动态文字", "提升流光、云阶歌词放大和旋转时的清晰度，可能略微增加资源占用", func() {
+			k.toggle("stage-hires", "高清动态文字", &s.StageHiRes, false, nil)
+		})
+	})
 	k.group("桌面歌词", func() {
 		k.row("桌面歌词", "在其他窗口之上显示当前歌词", func() {
 			k.toggle("desk-lyrics", "桌面歌词", &s.DeskLyrics, false, a.applyDeskLyrics)
