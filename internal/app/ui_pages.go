@@ -427,7 +427,12 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 	}
 	rowAt := func(i int) {
 		if i == 0 {
-			ui.Column(c).Children(func() {
+			head := ui.Column(c)
+			if a.more.slideX != 0 {
+				// An album opening or closing: the head comes in with the rows.
+				a.albumSlideIn(c, head)
+			}
+			head.Children(func() {
 				a.startMark(c)
 				header(c)
 			})

@@ -40,7 +40,9 @@ func (a *app) openAlbum(key, cover string, from ui.Rect) {
 // closeAlbum goes back from the album open to the albums, as they were.
 func (a *app) closeAlbum() {
 	if a.plView.album != "" {
-		a.plView.move = &albumMove{}
+		// Where the head's cover is now, for it to fly back from: the frame
+		// that closes it builds no head.
+		a.plView.move = &albumMove{from: a.headAt}
 		a.redraw()
 	}
 }
@@ -53,7 +55,7 @@ type albumMove struct {
 }
 
 // albumMoved opens or closes the album asked for, before the list builds.
-func (a *app) albumMoved() {
+func (a *app) albumMoved(now time.Time) {
 	v := &a.plView
 	m := v.move
 	if m == nil {
@@ -70,7 +72,7 @@ func (a *app) albumMoved() {
 		}
 		v.album = m.key
 		a.trackList = ui.ListState{}
-		a.albumSlide(48)
+		a.albumSlide(48, now)
 		if m.cover != "" && m.from.W > 0 && a.motion == motionFull {
 			a.flight = coverFlight{url: m.cover, from: m.from, rFrom: 14}
 		}
@@ -82,27 +84,42 @@ func (a *app) albumMoved() {
 		} else {
 			a.trackList = ui.ListState{}
 		}
-		a.albumSlide(-48)
-		if open && g.cover != "" && a.motion == motionFull && a.headAt.W > 0 {
-			a.flight = coverFlight{url: g.cover, from: a.headAt, rTo: 14, back: true}
+		a.albumSlide(-48, now)
+		if open && g.cover != "" && a.motion == motionFull && m.from.W > 0 {
+			a.flight = coverFlight{url: g.cover, from: m.from, rTo: 14, back: true}
 		}
 	}
 }
 
 // albumSlide has the rows coming in slide from dx, as an album opens or
 // closes.
-func (a *app) albumSlide(dx float32) {
-	a.more.switchedAt, a.more.slideX = time.Now(), dx
+func (a *app) albumSlide(dx float32, now time.Time) {
+	a.more.switchedAt, a.more.slideX = now, dx
 }
+
+// albumSlideIn slides e, a row of the list as an album opens or closes, in
+// from the side, fading in, by the time since: the list is built anew
+// then, and its rows have no frame before to go in from, as a transition
+// needs (going back to the albums showed them at once, the user, 1.3.2).
+func (a *app) albumSlideIn(c *ui.Context, e ui.Element) {
+	t := float32(c.Now().Sub(a.more.switchedAt)) / float32(albumSlideTime)
+	if a.motion == motionOff || t < 0 || t >= 1 {
+		return
+	}
+	k := 1 - (1-t)*(1-t)*(1-t)
+	e.Translate(a.more.slideX*(1-k), 0).Opacity(0.2 + 0.8*k)
+	c.AnimationFrame()
+}
+
+// albumSlideTime is how long the rows take to slide in.
+const albumSlideTime = 420 * time.Millisecond
 
 // albumHead heads the album open: back to the albums, its cover, name and
 // what it holds, and what plays it.
 func (a *app) albumHead(c *ui.Context, g albumGroup, tracks []netease.Track) {
 	p := a.pal
+	// It slides in with the rows under it (the list's head, albumSlideIn).
 	head := ui.Column(c.Key("album-open-"+g.key)).Gap(14).Padding(0, 0, 26, 0)
-	if a.motion != motionOff {
-		head.Transition(ui.ElementTransition{Animation: &viewSlide, Enter: &ui.Motion{X: 48}})
-	}
 	head.Children(func() {
 		back := ui.ButtonBase(c.Key("album-back")).Height(30).PaddingX(10).Gap(4).Radius(999).AlignItems(ui.Center).
 			AlignSelf(ui.Start).FocusRing(false).Label("返回全部专辑").Margin(0, 0, 0, -10)

@@ -77,3 +77,6 @@ func TestAlbumOpensAndComesBack(t *testing.T) {
 		t.Fatalf("the card of %s is out of view after coming back", name)
 	}
 }
+
+// timeZero is a zero time, for tests that move an album outside a frame.
+var timeZero time.Time

@@ -225,7 +225,7 @@ func (a *app) listShown(tracks []netease.Track) []netease.Track {
 // toolRows lists tracks as trackRows does, with listTools under the header.
 func (a *app) toolRows(c *ui.Context, tracks []netease.Track, covers bool, header func(c *ui.Context)) {
 	if a.plView.route == a.route {
-		a.albumMoved()
+		a.albumMoved(c.Now())
 	}
 	shown := a.listShown(tracks)
 	var foot []func(c *ui.Context)
