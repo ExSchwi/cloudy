@@ -358,6 +358,10 @@ func (a *app) back() {
 		a.nowPlaying = false
 		return
 	}
+	if _, open := a.albumOpen(); open && a.plView.route == a.route {
+		a.closeAlbum()
+		return
+	}
 	if len(a.history) == 0 {
 		return
 	}
@@ -607,6 +611,7 @@ func (a *app) content(c *ui.Context, foreground float32) {
 	// list, as a page's tabs in its header, opens it as the list builds.
 	if a.scrolled != a.route {
 		a.trackList, a.pageScroll, a.scrolled = ui.ListState{}, ui.ScrollState{}, a.route
+		a.listScroll, a.listLocate = ui.ScrollState{}, -1
 		a.pageScroll.Y, a.restoreY = a.restoreY, 0
 	}
 	a.headAt = ui.Rect{}

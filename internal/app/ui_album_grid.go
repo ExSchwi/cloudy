@@ -56,7 +56,7 @@ func (a *app) switchView(grid bool) {
 	}
 	a.settings.AlbumGrid = grid
 	a.changed()
-	a.more.switchedAt = time.Now()
+	a.more.switchedAt, a.more.slideX = time.Now(), 0
 	if row > 0 {
 		a.trackList.ScrollTo(row, ui.Start)
 	}
@@ -73,6 +73,10 @@ func (a *app) slideIn(c *ui.Context, e ui.Element, grid bool) {
 	dx := float32(56)
 	if !grid {
 		dx = -56
+	}
+	if a.more.slideX != 0 {
+		// An album opening, or closing (albumSlide).
+		dx = a.more.slideX
 	}
 	e.Transition(ui.ElementTransition{Animation: &viewSlide, Enter: &ui.Motion{X: dx}})
 }
@@ -135,8 +139,12 @@ func (a *app) albumGroupCard(c *ui.Context, g albumGroup, tracks []netease.Track
 	p := a.pal
 	card := ui.ButtonBase(c).Column().Gap(10).AlignItems(ui.Stretch).FocusRing(false).Label(g.name)
 	hovered := card.Hovered()
+	var artAt ui.Rect
 	card.Children(func() {
 		art := ui.Box(c).AspectRatio(1).Radius(14)
+		artAt = art.Bounds()
+		// Its cover flies back here as its album closes.
+		a.landBack(c, art, g.cover)
 		lift := ui.Pose{}
 		if hovered {
 			lift = ui.Pose{Y: -3}
@@ -163,7 +171,7 @@ func (a *app) albumGroupCard(c *ui.Context, g albumGroup, tracks []netease.Track
 		ui.Text(c, fmt.Sprintf("%s · %d 首", g.artist, g.n)).FontSize(12).TextColor(p.muted).SingleLine().Margin(-6, 0, 0, 0)
 	})
 	if card.Clicked() {
-		a.chooseAlbum(&a.plView, g.key)
+		a.openAlbum(g.key, g.cover, artAt)
 	}
 	return card
 }

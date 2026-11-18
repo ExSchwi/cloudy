@@ -487,6 +487,10 @@ var ErrNoCopyright = fmt.Errorf("%w: no copyright", ErrUnavailable)
 type StreamError struct {
 	Code  int
 	Cause error
+	// Song is set when the service answered for the song itself, with no
+	// address and no reason: a few retries may get one, endless retries
+	// leave the listener stuck on it.
+	Song bool
 }
 
 func (e *StreamError) Error() string {
@@ -625,15 +629,17 @@ func streamFromSongURLData(code int, d songURLData, level string) (*Stream, erro
 	}
 	if strings.TrimSpace(d.URL) == "" {
 		// The song's own code says why it has no address: 404, NetEase
-		// holds no rights to it; -110, the account may not play it. A
-		// retry gets the same answer.
+		// holds no rights to it; -110, -10, -100 and the like, the account
+		// may not play it. A retry gets the same answer, and a player
+		// retrying it waits on the song for good.
 		switch d.Code {
 		case 404:
 			return nil, ErrNoCopyright
-		case -110:
-			return nil, ErrUnavailable
+		case 0, 200:
+			// No reason given: maybe a hiccup, so worth a few retries.
+			return nil, &StreamError{Code: code, Song: true}
 		}
-		return nil, &StreamError{Code: code}
+		return nil, ErrUnavailable
 	}
 	s := Stream{Size: d.Size, Type: strings.ToLower(strings.TrimSpace(d.Type)), Level: d.Level, Gain: d.Gain}
 	if s.Type == "" {
@@ -700,21 +706,42 @@ func Lyrics(id int64) (lrc, translation, yrc string, err error) {
 }
 
 // Sized asks the image CDN for a picture of n×n pixels. A local cover is
-// already the size it is, and stays where it is.
+// marked with the size wanted (LocalSize), which the cover cache makes it
+// down to: a song's embedded cover is often thousands of pixels, decoded
+// whole for a row's 40 (the local music stuttered, a viewer, 1.3.1).
 func Sized(pic string, n int) string {
 	if pic == "" {
 		return ""
 	}
 	if !strings.HasPrefix(pic, "http://") && !strings.HasPrefix(pic, "https://") {
+		if _, ok := localPath(pic); ok && n > 0 {
+			return fmt.Sprintf("%s%s%d", pic, localSizeMark, n)
+		}
 		return pic
 	}
 	pic = strings.Replace(pic, "http://", "https://", 1)
 	return fmt.Sprintf("%s?param=%dy%d", pic, n, n)
 }
 
+// localSizeMark parts a local cover's path from the size Sized asked for,
+// which no path holds.
+const localSizeMark = "\x00px="
+
+// LocalSize returns the local cover raw names and the size Sized asked
+// for it at, or 0 when raw is no local cover of a size.
+func LocalSize(raw string) (string, int) {
+	path, size, ok := strings.Cut(raw, localSizeMark)
+	if !ok {
+		return raw, 0
+	}
+	n, _ := strconv.Atoi(size)
+	return path, n
+}
+
 // Fetch returns what is at raw, a cover the image CDN serves or a local
-// file.
+// file, whole, whatever the size Sized asked for.
 func Fetch(raw string) ([]byte, error) {
+	raw, _ = LocalSize(raw)
 	if path, ok := localPath(raw); ok {
 		return os.ReadFile(path)
 	}

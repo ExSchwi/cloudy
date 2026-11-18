@@ -72,6 +72,13 @@ func (a *app) syncThumbs() {
 		// The new cover is in. Until it is, the one before stays: going
 		// back to the window in between, which shows nothing while it is
 		// minimized or in the tray, left the thumbnail blank.
+		if at != nil && !window && at.track != st.track {
+			// Windows 10 kept the last thumbnail's frame for a new cover
+			// and stretched it until the pointer came back over the
+			// taskbar (a viewer, 1.3.1). Off and on again in the same
+			// breath, DWM measures the new one afresh.
+			a.win.SetThumbnail(nil)
+		}
 		a.win.SetThumbnail(a.pl.Cover())
 	}
 	if st.track == 0 {

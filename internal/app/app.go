@@ -133,6 +133,15 @@ type app struct {
 	// Where the page and the sidebar are scrolled, kept while Now Playing
 	// covers them, unbuilt.
 	pageScroll ui.ScrollState
+	// listScroll is where the list of songs is scrolled, which its floating
+	// buttons glide (listFloats); listBox is where it shows, and listLocate
+	// the row it glides to, to be set right where the glide fell short, or
+	// -1.
+	listScroll ui.ScrollState
+	listBox    ui.Rect
+	listLocate int
+	listAim    int // the row a glide is to head for, once it knows where it starts, or 0
+	listWait   int // frames until then
 	navScroll  ui.ScrollState
 	scrolled   route // the page trackList and pageScroll are of
 

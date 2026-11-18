@@ -323,6 +323,7 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *netease.Track, art *artwork, acc
 				}
 				actions := func(size float32) {
 					a.likeCountButton(c.Key("like"), tr, size, white.Alpha(0.7))
+					a.dislikeButton(c, tr, size, white.Alpha(0.7))
 					a.commentCountButton(c.Key("comment-count"), tr, size, white.Alpha(0.7))
 				}
 				switch {
@@ -702,6 +703,7 @@ func (a *app) stageBar(c *ui.Context, tr *netease.Track, art *artwork, accent ui
 					a.artistLinks(c, tr, white.Alpha(0.55), white).FontSize(12).SingleLine()
 				})
 				a.likeCountButton(c.Key("like"), tr, 17, white.Alpha(0.6))
+				a.dislikeButton(c, tr, 17, white.Alpha(0.6))
 				a.commentCountButton(c.Key("comment-count"), tr, 17, white.Alpha(0.6))
 				a.songMenu(c.Key("more"), tr, 17, white.Alpha(0.6)).Margin(0, 0, 0, -10)
 			})
@@ -913,14 +915,22 @@ func (a *app) timedLines(c *ui.Context, scroll ui.Element, lines []lyrics.Line, 
 					}
 					text.Children(func() {
 						ui.Box(c.Key("sung")).Children(func() {
-							if on && len(l.Words) > 0 {
+							if len(l.Words) > 0 {
 								// The line sung lights up word by word as it is sung.
+								// Every line of words is built the same, lit or not:
+								// the line coming in turned from one text into
+								// a run per word, laid out anew, and the
+								// lyrics hitched as they moved on (a viewer, 1.3.1).
 								ui.RichText(c.Key("words")).FontSize(st.size).FontWeight(st.weight).LineHeight(st.lineHeight).LetterSpacing(-0.4).Children(func() {
 									for wi, wd := range l.Words {
-										ui.Text(c.Key(wi), wd.Text).TextColor(white.Alpha(0.38 + 0.62*wordLit(wd, pos)))
+										lit := float32(1)
+										if on {
+											lit = 0.38 + 0.62*wordLit(wd, pos)
+										}
+										ui.Text(c.Key(wi), wd.Text).TextColor(white.Alpha(lit))
 									}
 								})
-								if pl.Playing() {
+								if on && pl.Playing() {
 									// Words brighten smoothly enough at 25 frames a second.
 									c.After(40 * time.Millisecond)
 								}

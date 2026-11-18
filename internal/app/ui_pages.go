@@ -569,7 +569,9 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 	}
 	// The header stays as the rows under it switch between the songs and
 	// the grid, those coming sliding in from the side of their button.
-	ui.List(c.Key(a.route), &a.trackList, rows, func(i int) {
+	// An album opened is a list of its own (ui_album_open.go): the albums'
+	// come back as they were, built anew from the state kept.
+	list := ui.List(c.Key(listKey{a.route, a.plView.album}), &a.trackList, rows, func(i int) {
 		if i == 0 {
 			rowAt(0)
 			return
@@ -591,6 +593,14 @@ func (a *app) trackRowsGrouped(c *ui.Context, tracks []netease.Track, groups []a
 			a.albumGridLine(c, i-1, cols, groups, tracks)
 		})
 	}).Grow(1).Padding(top+pageGap, pagePad-12, listBottom+32, pagePad-12).ScrollbarInsets(top, 0, listBottom, 0)
+	// Only while it glides (listFloats): kept always, the offset it wrote
+	// put the list a pixel off its rows where it was built again, as Now
+	// Playing closed over it. A glide starts from where the list shows.
+	if a.listScroll.Scrolling() {
+		list.TrackScroll(&a.listScroll)
+	}
+	a.listBox = list.LayoutBounds()
+	a.listFloats(c, listBottom, grid)
 }
 
 // listView keys the rows of a list apart as songs or as a grid of albums.

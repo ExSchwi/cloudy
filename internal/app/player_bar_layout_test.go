@@ -130,6 +130,24 @@ func TestPlayerBarCompactCounts(t *testing.T) {
 	}
 }
 
+// Roomy, the controls sit in the middle of the bar; narrower, the progress
+// is no shorter than in 1.3.1 (about 250 at 1180).
+func TestPlayerBarCentered(t *testing.T) {
+	for _, width := range []int{1180, 1440, 1680} {
+		a := playerBarLayoutApp()
+		tt := playerBarTester(a, width)
+		play := barElement(t, tt, "播放/暂停")
+		progress := barElement(t, tt, "播放进度")
+		bar := a.barBox
+		if d := play.X + play.W/2 - (bar.X + bar.W/2); width >= 1440 && (d > 4 || d < -4) {
+			t.Fatalf("%d: play is %.1f off the bar's center (bar=%+v play=%+v)", width, d, bar, play)
+		}
+		if progress.W < 250 {
+			t.Fatalf("%d: progress squeezed to %.0f", width, progress.W)
+		}
+	}
+}
+
 // The compact menu retains mode selection and playlist actions; its
 // visible comment button still opens the current song's comments.
 func TestPlayerBarCompactActions(t *testing.T) {
@@ -194,6 +212,24 @@ func TestPlayerBarResponsiveFrames(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+		}
+	}
+}
+
+// The heart, the comments and adding to a playlist stand at even steps,
+// counts or not (a viewer, 1.3.2-test.1).
+func TestPlayerBarEvenSteps(t *testing.T) {
+	for _, width := range []int{1180, 1440} {
+		a := playerBarLayoutApp()
+		tt := playerBarTester(a, width)
+		heart, comments, add := barElement(t, tt, "喜欢"), barElement(t, tt, "评论"), barElement(t, tt, "添加到歌单")
+		mid := func(r ui.Rect) float32 { return r.X + r.W/2 }
+		one, two := mid(comments)-mid(heart), mid(add)-mid(comments)
+		if d := one - two; d > 0.5 || d < -0.5 {
+			t.Fatalf("%d: steps %.1f and %.1f (heart=%+v comments=%+v add=%+v)", width, one, two, heart, comments, add)
+		}
+		if !tt.HasText("999+") {
+			t.Fatalf("%d: roomy bar lost its comment count", width)
 		}
 	}
 }

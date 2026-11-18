@@ -52,7 +52,11 @@ func (a *app) applyGlobalKeys() {
 	}
 	for _, k := range shortcutActions {
 		keys := k.keys
-		if custom := strings.TrimSpace(a.settings.Shortcuts[k.id]); custom != "" {
+		custom := strings.TrimSpace(a.settings.Shortcuts[k.id])
+		if custom == shortcutOff {
+			continue // turned off by the listener: no key, none taken
+		}
+		if custom != "" {
 			keys = []string{custom}
 		}
 		do, taken := k.do, true

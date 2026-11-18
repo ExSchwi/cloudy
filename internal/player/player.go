@@ -952,6 +952,8 @@ func (p *Player) opened(gen int, t netease.Track, info *netease.Stream, s stream
 		}
 		p.err = err.Error()
 		switch {
+		case unplayable(err) && !errors.Is(err, netease.ErrUnavailable):
+			p.err = "获取不到这首歌的播放地址"
 		case !errors.Is(err, netease.ErrUnavailable):
 		case t.ProgramID != 0:
 			p.err = "这期节目需要购买才能收听"
@@ -962,7 +964,7 @@ func (p *Player) opened(gen int, t netease.Track, info *netease.Stream, s stream
 		}
 		// Only an unavailable song is skipped. A failed connection or
 		// cache must not send the listener through the whole queue.
-		if errors.Is(err, netease.ErrUnavailable) && skipped+1 < len(p.order) {
+		if unplayable(err) && skipped+1 < len(p.order) {
 			next := (p.at + direction + len(p.order)) % len(p.order)
 			if direction > 0 && next == 0 && p.feed != nil {
 				p.awaitFeed()
