@@ -31,6 +31,8 @@ const (
 	pageStyle // the day's songs in the styles picked
 	pageLocal // the listener's own music, in the folders they chose
 	pageWeek  // 本周听歌排行, the songs played most in the last seven days
+	// pageHistoryDaily shows the past daily recommendations NetEase keeps.
+	pageHistoryDaily
 )
 
 type route struct {
@@ -269,13 +271,14 @@ type app struct {
 	savedSession string // the session as last kept
 	sessionDue   bool   // a save of the session is due
 
-	style         styleState // the day's songs in the styles picked
-	deck          deckState  // the home page's calendar of the daily and style cards
-	week          weekState  // the songs played most in the last seven days
-	deckDrawer    bool       // the settings' drawer of what the calendar holds is open
-	deckSort      deckSort   // a page dragged to a new place in that drawer
-	queueAdding   bool       // the queue's drawer of playlists to add it to is open
-	radar         radarState // NetEase's radars on the home page
+	style         styleState   // the day's songs in the styles picked
+	deck          deckState    // the home page's calendar of the daily and style cards
+	week          weekState    // the songs played most in the last seven days
+	hist          historyDaily // the past daily recommendations NetEase keeps
+	deckDrawer    bool         // the settings' drawer of what the calendar holds is open
+	deckSort      deckSort     // a page dragged to a new place in that drawer
+	queueAdding   bool         // the queue's drawer of playlists to add it to is open
+	radar         radarState   // NetEase's radars on the home page
 	lyricDownload lyricDownloadState
 	progressAt    progressShown // what the taskbar button last showed of the song
 }
