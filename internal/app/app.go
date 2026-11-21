@@ -212,6 +212,7 @@ type app struct {
 	npK                   float32          // how far Now Playing has opened, from 0 to 1
 	npCoverScale          float32          // how its cover stands, which the flight lands at
 	motion                int              // how much the app moves, in this frame
+	dialogScaling         bool             // the dialog being built grows in (scalingBody)
 	playFlies             func(ui.Element) // what hides the play button being built as it flies
 	pageDir               int              // the way the page last changed: 1 in, -1 back, 0 across
 	feedback              feedbackState    // the message being written, in the settings
@@ -457,6 +458,7 @@ func Run() error {
 		a.loadLibraryLater()
 		a.applyTray()
 		a.applyDeskLyrics()
+		mygo.Screen.OnDisplaysChanged(func() { a.post(a.refitFloats) })
 		// The thumbnail's buttons, and their glyphs as the taskbar turns
 		// light or dark.
 		a.readTaskbarDark()

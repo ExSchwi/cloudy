@@ -185,24 +185,42 @@ func (s *flacStream) decode(f *frame.Frame) {
 // what comes before it there. It finds that frame by the secant method,
 // guessing where in the bytes it is from the frames found on either side,
 // until one is found less than a second before it.
+//
+// A guess just past the target found the frame there again and again, so
+// the frame before it was never found, and the song decoded from its start:
+// one still coming in waited for all of it before (1.3.3). Each guess aims
+// half a second early, and halves the bytes between instead when the last
+// one moved the same side, or found no frame.
 func (s *flacStream) SetPosition(target int64) error {
 	total := int64(s.info.NSamples)
 	size := s.dl.totalSize()
 	if size <= 0 {
 		size = s.dl.waitFor(math.MaxInt64)
 	}
+	rate := int64(s.info.SampleRate)
 	loOff, lo := s.start, int64(0)
 	hiOff, hi := size, total
-	for tries := 0; tries < 8 && target-lo > int64(s.info.SampleRate) && hi > lo; tries++ {
-		guess := loOff + int64(float64(hiOff-loOff)*float64(target-lo)/float64(hi-lo))
-		off, at, ok := s.frameAfter(max(guess, loOff+1), hiOff)
-		if !ok {
-			break
-		}
-		if at > target {
-			hiOff, hi = off, at
+	side, halve := 0, false // the side the last guess moved: -1 lo, 1 hi
+	for tries := 0; tries < 24 && target-lo > rate && hi > lo && hiOff-loOff > 2; tries++ {
+		var guess int64
+		if halve {
+			guess = loOff + (hiOff-loOff)/2
 		} else {
+			aim := max(lo, target-rate/2)
+			guess = loOff + int64(float64(hiOff-loOff)*float64(aim-lo)/float64(hi-lo))
+		}
+		guess = max(guess, loOff+1)
+		off, at, ok := s.frameAfter(guess, hiOff)
+		switch {
+		case !ok:
+			// No frame starts from guess on: the one holding it starts before.
+			hiOff, side, halve = guess, 1, true
+		case at > target:
+			hiOff, hi = off, at
+			halve, side = side == 1, 1
+		default:
 			loOff, lo = off, at
+			halve, side = side == -1, -1
 		}
 	}
 	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff, rebuffer: s.dl.parent == nil}, 64<<10)

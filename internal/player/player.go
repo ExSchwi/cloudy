@@ -121,6 +121,9 @@ type Player struct {
 	seeking bool
 	seekTo  time.Duration
 	seekGen int
+	// timeline is set while the system is told the position every
+	// second, as it plays (keepTimeline).
+	timeline bool
 }
 
 func New(post func(func())) *Player {
@@ -170,6 +173,38 @@ func (p *Player) sync() {
 		state = mygo.PlaybackPlaying
 	}
 	mygo.NowPlaying.SetPlayback(state, p.Position())
+	if p.playing {
+		p.keepTimeline()
+	}
+}
+
+// timelineEvery is how often the system hears the position as it plays.
+const timelineEvery = time.Second
+
+// keepTimeline tells the system the position every second while a song
+// plays. Windows' media controls do not count on from the position they
+// were given, and lyrics apps reading them stood still at it (#32).
+func (p *Player) keepTimeline() {
+	if p.timeline || !mygo.App.IsReady() {
+		return
+	}
+	p.timeline = true
+	var tick func()
+	tick = func() {
+		time.AfterFunc(timelineEvery, func() {
+			mygo.RunOnMain(func() {
+				if !p.playing || p.track == nil {
+					p.timeline = false
+					return
+				}
+				if !p.seeking {
+					mygo.NowPlaying.SetPlayback(mygo.PlaybackPlaying, p.Position())
+				}
+				tick()
+			})
+		})
+	}
+	tick()
 }
 
 // announce shows the system the track, and its cover once loaded.
