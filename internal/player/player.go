@@ -212,6 +212,8 @@ func (p *Player) ended() {
 		p.heardGen = 0
 		p.out.Seek(0)
 		p.out.Play()
+		p.fade.fade(1, fadeIn, nil)
+		p.sync()
 		return
 	}
 	if p.at+1 >= len(p.order) && p.feed != nil {
@@ -582,7 +584,7 @@ func (p *Player) TogglePlay() {
 	}
 	p.playing = true
 	if !p.seeking && !out.Playing() {
-		if out.Position() >= out.Duration()-time.Second {
+		if d := out.Duration(); d > 0 && out.Position() >= d-time.Second {
 			out.Seek(0)
 		}
 		out.Play()
@@ -702,6 +704,15 @@ func (p *Player) measureLater(gen int, s stream, durationMs int64, keys ...strin
 	loud := p.Loud
 	go func() {
 		defer cancel()
+		// Let playback fill its initial decode buffer before a second
+		// concurrent decoder starts reading the same download.
+		timer := time.NewTimer(1500 * time.Millisecond)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		}
 		ms, err := openSharedContext(ctx, dl, durationMs)
 		if err != nil {
 			return
@@ -1170,10 +1181,12 @@ func (p *Player) Restore(s Session) {
 // finish keeps a broken stream from looking like a song played to its end.
 func (p *Player) finish(s *checkedStream) {
 	err := s.Err()
-	if err == nil && p.out.Duration()-p.out.Position() > 2*time.Second && !(p.cloudSong() && s.whole()) {
-		// Short of its length: cut off. But a cloud drive's song that all
-		// came in is as long as its file, which is often shorter than the
-		// song NetEase matched it to, whose length its details give.
+	gap := p.out.Duration() - p.out.Position()
+	// A complete download whose real audio is slightly shorter than NetEase's
+	// metadata duration (common on edits/remasters and cloud drive files)
+	// finished naturally; a truly cut-off or zero-byte stream still retries.
+	wholeComplete := s.whole() && (p.cloudSong() || (s.hasBytes() && p.out.Position() > 0 && gap <= 15*time.Second))
+	if err == nil && gap > 2*time.Second && !wholeComplete {
 		err = errors.New("歌曲音频不完整，请重新加载")
 	}
 	if err != nil {

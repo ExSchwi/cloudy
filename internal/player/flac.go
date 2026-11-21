@@ -32,41 +32,72 @@ type flacStream struct {
 }
 
 func openFLACStream(dl *download) (*flacStream, error) {
-	start, err := flacDataStart(dl)
-	if err != nil {
-		return nil, err
-	}
 	from := id3Size(dl)
-	st, err := flac.New(bytes.NewReader(dl.peek(from, int(start-from))))
+	info, err := flacStreamInfo(dl, from)
 	if err != nil {
 		return nil, err
 	}
-	s := &flacStream{dl: dl, info: st.Info, start: start, drop: dl.Close}
+	start, err := flacDataStartFrom(dl, from)
+	if err != nil {
+		return nil, err
+	}
+	s := &flacStream{dl: dl, info: info, start: start, drop: dl.Close}
 	if s.info.NChannels == 0 || s.info.SampleRate == 0 {
 		return nil, errors.New("flac: no stream info")
 	}
 	s.spec = dl.spectrum(int(s.info.SampleRate), int64(s.info.NSamples))
-	s.r = bufio.NewReaderSize(&downloadReader{d: dl, pos: start}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{d: dl, pos: start, rebuffer: dl.parent == nil}, 64<<10)
 	return s, nil
+}
+
+// flacStreamInfo parses only the mandatory 34-byte STREAMINFO block at from,
+// avoiding strict parsing of trailing metadata blocks and avoiding downloading
+// multi-megabyte embedded PICTURE blocks before playback can begin.
+func flacStreamInfo(dl *download, from int64) (*meta.StreamInfo, error) {
+	const headerBytes = 4 + 4 + 34
+	if !dl.waitAt(from, headerBytes) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	head := dl.peek(from, headerBytes)
+	if len(head) < headerBytes || string(head[:4]) != "fLaC" {
+		return nil, errors.New("flac: not a FLAC file")
+	}
+	blockLen := int(head[5])<<16 | int(head[6])<<8 | int(head[7])
+	if head[4]&0x7f != 0 || blockLen != 34 {
+		return nil, errors.New("flac: missing STREAMINFO block")
+	}
+	head[4] |= 0x80 // mark STREAMINFO as the last block for flac.New
+	st, err := flac.New(bytes.NewReader(head))
+	if err != nil {
+		return nil, err
+	}
+	return st.Info, nil
 }
 
 // flacDataStart returns where a FLAC file's first frame starts, after its
 // ID3 tag, if any, and its metadata blocks.
 func flacDataStart(dl *download) (int64, error) {
-	off := id3Size(dl)
-	if dl.waitFor(off+4) < off+4 || string(dl.peek(off, 4)) != "fLaC" {
+	return flacDataStartFrom(dl, id3Size(dl))
+}
+
+func flacDataStartFrom(dl *download, from int64) (int64, error) {
+	off := from
+	if !dl.waitAt(off, 4) || string(dl.peek(off, 4)) != "fLaC" {
 		return 0, errors.New("flac: not a FLAC file")
 	}
 	off += 4
 	for {
-		if dl.waitFor(off+4) < off+4 {
+		if !dl.waitAt(off, 4) {
 			return 0, io.ErrUnexpectedEOF
 		}
 		h := dl.peek(off, 4)
+		if len(h) < 4 {
+			return 0, io.ErrUnexpectedEOF
+		}
 		last := h[0]&0x80 != 0
 		off += 4 + (int64(h[1])<<16 | int64(h[2])<<8 | int64(h[3]))
 		if last {
-			if dl.waitFor(off) < off {
+			if !dl.waitAt(off, 1) {
 				return 0, io.ErrUnexpectedEOF
 			}
 			return off, nil
@@ -156,7 +187,7 @@ func (s *flacStream) decode(f *frame.Frame) {
 // until one is found less than a second before it.
 func (s *flacStream) SetPosition(target int64) error {
 	total := int64(s.info.NSamples)
-	size := s.dl.size
+	size := s.dl.totalSize()
 	if size <= 0 {
 		size = s.dl.waitFor(math.MaxInt64)
 	}
@@ -174,7 +205,7 @@ func (s *flacStream) SetPosition(target int64) error {
 			loOff, lo = off, at
 		}
 	}
-	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff, rebuffer: s.dl.parent == nil}, 64<<10)
 	s.pos, s.skip, s.pend = target, target-lo, s.pend[:0]
 	return nil
 }
