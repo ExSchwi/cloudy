@@ -159,13 +159,14 @@ type app struct {
 	suggestions suggestState          // what the search field's query may be after
 
 	nowPlaying   bool
-	npFull       bool      // Now Playing taking the whole screen
-	fullHintAt   time.Time // when the bubble telling of F11 first showed in this run
-	sysAccent    string    // the desktop's accent as #RRGGBB, "" where it has none
-	npOpen       bool      // Now Playing as it last showed: open or not
-	npChangedAt  time.Time // when it last opened or closed
-	npPane       int       // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
-	npPaneTop    float32   // how far the cover beside the pane starts below its top
+	npFull       bool        // Now Playing taking the whole screen
+	fullHintAt   time.Time   // when the bubble telling of F11 first showed in this run
+	sysAccent    string      // the desktop's accent as #RRGGBB, "" where it has none
+	npOpen       bool        // Now Playing as it last showed: open or not
+	npChangedAt  time.Time   // when it last opened or closed
+	releaseT     *time.Timer // gives memory back after a view goes (releaseSoon)
+	npPane       int         // paneLyrics, paneQueue, paneStage, paneComments, paneProgram, paneCaptions, paneWall or paneWiki
+	npPaneTop    float32     // how far the cover beside the pane starts below its top
 	lyricScroll  ui.ScrollState
 	lyricGlide   lyricGlide
 	lyricWheel   float32   // the wheel over a lyric value, short of a step

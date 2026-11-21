@@ -133,6 +133,7 @@ func (a *app) dropFloat(slot **mygo.Window) {
 	*slot = nil
 	win.Hide()
 	a.post(win.Destroy)
+	a.releaseSoon()
 }
 
 // toggleDeskLyrics turns them on or off, from wherever that is offered.

@@ -581,6 +581,13 @@ type npPreview struct {
 	start  time.Time
 	at     time.Time
 	w, h   int
+	shown  previewBackdrop
+}
+
+type previewBackdrop struct {
+	style       string
+	tint        ui.Color
+	fog, moving bool
 }
 
 // previewDrops are drops as music lets them fall, one after another,
@@ -606,11 +613,13 @@ func (a *app) nowPlayingPreview(c *ui.Context) {
 	still := c.Preferences().ReduceMotion
 	cover := a.thumbTint()
 	style := s.FogStyle
+	scene := backdropSceneOf(style)
 	tint := cover
 	if s.Fog {
-		tint = s.tintOf(backdropSceneOf(style).id, cover)
+		tint = s.tintOf(scene.id, cover)
 	}
 	fog := s.Fog
+	backdrop := previewBackdrop{style: style, tint: tint, fog: fog, moving: fog && !still}
 	box := ui.Box(c.Key("np-preview")).Height(196).Radius(20).Margin(18, 0, 0, 0).Background(white.Alpha(0.06)).Label("播放页预览")
 	box.Draw(func(p *ui.Painter, r ui.Rect) {
 		w, h := int(r.W), int(r.H)
@@ -629,20 +638,26 @@ func (a *app) nowPlayingPreview(c *ui.Context) {
 		if still {
 			drift = 6.4
 		}
-		if pv.at.IsZero() || now.Sub(pv.at) >= backdropFrame-2*time.Millisecond {
-			pv.at = now
+		if pv.at.IsZero() || backdrop != pv.shown || backdrop.moving && now.Sub(pv.at) >= backdropFrame-2*time.Millisecond {
+			pv.at, pv.shown = now, backdrop
 			pv.canvas.Draw(p, func(cp *ui.Painter) {
 				b := ui.Rect{W: float32(w), H: float32(h)}
 				if !fog {
 					drawBackdrop(cp, b, nil, tint)
 					return
 				}
-				drops := previewDrops(drift)
-				drawSceneDrops(cp, b, style, tint, drift, 0.3, drops, nil)
-				drawSceneOver(cp, b, style, tint, drift, 0.3, 1, drops, nil)
+				var drops, leaves []float32
+				if scene.drops {
+					drops = previewDrops(drift)
+				}
+				if scene.over != nil {
+					leaves = demoLeaves(drift)
+				}
+				drawSceneDrops(cp, b, style, tint, drift, 0.3, drops, leaves)
+				drawSceneOver(cp, b, style, tint, drift, 0.3, 1, drops, leaves)
 			})
 		}
-		if fog && !still {
+		if backdrop.moving {
 			p.After(backdropFrame)
 		}
 	})
