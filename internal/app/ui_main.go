@@ -340,6 +340,8 @@ func (a *app) load(r route) {
 		if len(a.week.songs) == 0 {
 			a.loadWeek()
 		}
+	case pageHistoryDaily:
+		a.loadHistoryDays()
 	case pageCloud:
 		a.loadCloud(false)
 	case pageLocal:
@@ -672,6 +674,8 @@ func (a *app) content(c *ui.Context, foreground float32) {
 			a.stylePage(c)
 		case pageWeek:
 			a.weekPage(c)
+		case pageHistoryDaily:
+			a.historyPage(c)
 		}
 	})
 }

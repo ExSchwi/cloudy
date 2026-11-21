@@ -268,6 +268,10 @@ func DailySongs() ([]Track, error) {
 	return songs, nil
 }
 
+// songDetails is SongDetails, through a variable so tests can answer
+// without the eapi, which they cannot reach.
+var songDetails = SongDetails
+
 // detailPrivileges gives songs the privileges their details carry for the
 // listener, which are right where other lists have none, or wrong ones.
 func detailPrivileges(songs []Track) {
@@ -275,7 +279,7 @@ func detailPrivileges(songs []Track) {
 	for i := range songs {
 		ids[i] = songs[i].ID
 	}
-	details, _ := SongDetails(ids) // as many as came
+	details, _ := songDetails(ids) // as many as came
 	var privileges []Privilege
 	for _, d := range details {
 		if d.Privilege != nil {
