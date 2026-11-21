@@ -84,14 +84,65 @@ func (c *Cache) SetDir(dir string) {
 
 func cacheKey(id int64, level string) string { return fmt.Sprintf("%d-%s", id, level) }
 
+// cacheMeta is the JSON metadata stored beside each cached song. It embeds
+// netease.Stream for backward compatibility and records the highest quality
+// level that resolved to this file so downgraded tracks (e.g. a "hires"
+// request that NetEase serves as "lossless" or "exhigh") hit the cache on
+// subsequent plays instead of re-downloading every time.
+type cacheMeta struct {
+	netease.Stream
+	MaxRequested string `json:"maxRequested,omitempty"`
+	CheckedAt    int64  `json:"checkedAt,omitempty"`
+}
+
+// qualityHintTTL bounds how long a downgraded quality mapping is trusted
+// before re-checking NetEase (e.g. after VIP changes or catalog upgrades).
+const qualityHintTTL = 7 * 24 * time.Hour
+
+func levelIndex(level string) int {
+	return slices.Index(netease.Levels, level)
+}
+
+func higherLevel(a, b string) string {
+	if levelIndex(b) > levelIndex(a) {
+		return b
+	}
+	return a
+}
+
 // keepable reports whether a song of level and type ext may be kept: they
 // name its file, so only those known, which keep it in the cache's folder.
 func keepable(level, ext string) bool {
 	return slices.Contains(netease.Levels, level) && (ext == "mp3" || ext == "flac")
 }
 
-// lookup returns a song kept at level or a better one, open to read, with
-// its stream.
+func (c *Cache) openCached(dir string, id int64, lv string) (*download, *cacheMeta, bool) {
+	key := cacheKey(id, lv)
+	raw, err := os.ReadFile(filepath.Join(dir, key+".json"))
+	if err != nil {
+		return nil, nil, false
+	}
+	var meta cacheMeta
+	if json.Unmarshal(raw, &meta) != nil || !keepable(lv, meta.Type) {
+		return nil, nil, false
+	}
+	path := filepath.Join(dir, key+"."+meta.Type)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, false
+	}
+	if info, err := f.Stat(); err != nil || info.Size() != meta.Size {
+		f.Close()
+		return nil, nil, false
+	}
+	// Played now: the last to go.
+	now := time.Now()
+	os.Chtimes(path, now, now)
+	return opened(f, meta.Size), &meta, true
+}
+
+// lookup returns a song kept at level or a better one, or a lower-level copy
+// that a recent request for level (or higher) already resolved to.
 func (c *Cache) lookup(id int64, level string) (*download, *netease.Stream, bool) {
 	if c == nil {
 		return nil, nil, false
@@ -99,41 +150,69 @@ func (c *Cache) lookup(id int64, level string) (*download, *netease.Stream, bool
 	dir := c.Dir()
 	at := max(slices.Index(netease.Levels, level), 0)
 	for _, lv := range netease.Levels[at:] {
+		if dl, meta, ok := c.openCached(dir, id, lv); ok {
+			return dl, &meta.Stream, true
+		}
+	}
+	for i := at - 1; i >= 0; i-- {
+		lv := netease.Levels[i]
 		key := cacheKey(id, lv)
-		meta, err := os.ReadFile(filepath.Join(dir, key+".json"))
+		raw, err := os.ReadFile(filepath.Join(dir, key+".json"))
 		if err != nil {
 			continue
 		}
-		var st netease.Stream
-		if json.Unmarshal(meta, &st) != nil || !keepable(lv, st.Type) {
+		var meta cacheMeta
+		if json.Unmarshal(raw, &meta) != nil || !keepable(lv, meta.Type) {
 			continue
 		}
-		path := filepath.Join(dir, key+"."+st.Type)
-		f, err := os.Open(path)
-		if err != nil {
+		if levelIndex(meta.MaxRequested) < at || meta.CheckedAt <= 0 || time.Since(time.Unix(meta.CheckedAt, 0)) > qualityHintTTL {
 			continue
 		}
-		if info, err := f.Stat(); err != nil || info.Size() != st.Size {
-			f.Close()
-			continue
+		if dl, openedMeta, ok := c.openCached(dir, id, lv); ok {
+			return dl, &openedMeta.Stream, true
 		}
-		// Played now: the last to go.
-		now := time.Now()
-		os.Chtimes(path, now, now)
-		return opened(f, st.Size), &st, true
 	}
 	return nil, nil, false
+}
+
+// lookupExactAndAlias checks whether actualLevel for id is already cached on
+// disk (used right after SongURL resolves a downgraded quality) and, if so,
+// records that requesting reqLevel resolved to actualLevel so future lookups
+// hit the cache directly without hitting the network.
+func (c *Cache) lookupExactAndAlias(id int64, actualLevel, reqLevel string) (*download, *netease.Stream, bool) {
+	if c == nil || !slices.Contains(netease.Levels, actualLevel) {
+		return nil, nil, false
+	}
+	dir := c.Dir()
+	dl, meta, ok := c.openCached(dir, id, actualLevel)
+	if !ok {
+		return nil, nil, false
+	}
+	if levelIndex(reqLevel) > levelIndex(actualLevel) {
+		meta.MaxRequested = higherLevel(meta.MaxRequested, reqLevel)
+		meta.CheckedAt = time.Now().Unix()
+		if raw, err := json.Marshal(meta); err == nil {
+			os.WriteFile(filepath.Join(dir, cacheKey(id, actualLevel)+".json"), raw, 0o600)
+		}
+	}
+	return dl, &meta.Stream, true
 }
 
 // download fetches the song into a file. Songs the cache does not keep use
 // a temporary spool, removed when playback and its readers have finished.
 func (c *Cache) download(id int64, st *netease.Stream) *download {
+	return c.downloadFor(id, "", st)
+}
+
+// downloadFor fetches the song into a file and records reqLevel if NetEase
+// served a lower quality than requested.
+func (c *Cache) downloadFor(id int64, reqLevel string, st *netease.Stream) *download {
 	part := c.part(st)
 	if part == nil {
 		part, _ = os.CreateTemp("", streamSpools)
 		return startDownload(st.URL, st.Size, part, nil, nil)
 	}
-	keep, settle := c.keeper(id, st)
+	keep, settle := c.keeperFor(id, reqLevel, st)
 	return startDownload(st.URL, st.Size, part, keep, settle)
 }
 
@@ -162,8 +241,12 @@ func (c *Cache) part(st *netease.Stream) *os.File {
 }
 
 func (c *Cache) keeper(id int64, st *netease.Stream) (func(string, int64) (string, bool), func(string)) {
+	return c.keeperFor(id, "", st)
+}
+
+func (c *Cache) keeperFor(id int64, reqLevel string, st *netease.Stream) (func(string, int64) (string, bool), func(string)) {
 	return func(part string, n int64) (string, bool) {
-		return c.keep(id, st, part, n)
+		return c.keepFor(id, reqLevel, st, part, n)
 	}, c.settled
 }
 
@@ -178,6 +261,10 @@ func (c *Cache) settled(path string) {
 // is closed. It returns where the song is: kept, or still at part. The
 // caller settles the file once it has opened it.
 func (c *Cache) keep(id int64, st *netease.Stream, part string, n int64) (string, bool) {
+	return c.keepFor(id, "", st, part, n)
+}
+
+func (c *Cache) keepFor(id int64, reqLevel string, st *netease.Stream, part string, n int64) (string, bool) {
 	c.mu.Lock()
 	limit, dir := c.limit, c.dir
 	c.mu.Unlock()
@@ -193,21 +280,78 @@ func (c *Cache) keep(id int64, st *netease.Stream, part string, n int64) (string
 		return part, false
 	}
 	key := cacheKey(id, kept.Level)
-	meta, _ := json.Marshal(kept)
+	metaPath := filepath.Join(dir, key+".json")
+	cm := cacheMeta{Stream: kept}
+	if prevRaw, err := os.ReadFile(metaPath); err == nil {
+		var prev cacheMeta
+		if json.Unmarshal(prevRaw, &prev) == nil && prev.MaxRequested != "" && prev.CheckedAt > 0 && time.Since(time.Unix(prev.CheckedAt, 0)) <= qualityHintTTL {
+			cm.MaxRequested, cm.CheckedAt = prev.MaxRequested, prev.CheckedAt
+		}
+	}
+	if levelIndex(reqLevel) > levelIndex(kept.Level) {
+		cm.MaxRequested = higherLevel(cm.MaxRequested, reqLevel)
+		cm.CheckedAt = time.Now().Unix()
+	}
+	meta, _ := json.Marshal(cm)
 	path := filepath.Join(dir, key+"."+kept.Type)
 	// keep is called with the download lock held, and the decoder waits
 	// on that lock. Protect the name before it exists, then make sure a
 	// clean starts after the file is there: one may already have looked.
 	c.protect(path)
 	if os.Rename(part, path) != nil {
-		c.forget(path)
-		return part, false
+		// On Windows, renaming an existing .part over an existing cached copy
+		// fails while another reader (such as a fading tail or loudness meter)
+		// still has it open. If part itself exists with size n and the
+		// destination already holds the complete file of the same size, reuse
+		// it and still persist the updated metadata.
+		pInfo, perr := os.Stat(part)
+		existing, serr := os.Stat(path)
+		if perr == nil && pInfo.Size() == n && serr == nil && existing.Size() == n {
+			os.Remove(part)
+		} else {
+			c.forget(path)
+			return part, false
+		}
 	}
-	os.WriteFile(filepath.Join(dir, key+".json"), meta, 0o600)
+	os.WriteFile(metaPath, meta, 0o600)
 	if c.kick() {
 		go c.pruneLoop()
 	}
 	return path, true
+}
+
+// ResetQualityHints clears downgraded quality aliases on cached songs so
+// higher-tier requests (e.g. after upgrading to VIP) re-check NetEase.
+func (c *Cache) ResetQualityHints() {
+	if c == nil {
+		return
+	}
+	dir := c.Dir()
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var meta cacheMeta
+		if json.Unmarshal(raw, &meta) != nil || meta.MaxRequested == "" {
+			continue
+		}
+		meta.MaxRequested, meta.CheckedAt = "", 0
+		if updated, err := json.Marshal(meta); err == nil {
+			os.WriteFile(path, updated, 0o600)
+		}
+	}
 }
 
 // Size returns how many bytes the songs kept take.

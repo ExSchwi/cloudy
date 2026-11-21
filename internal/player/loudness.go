@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -205,9 +206,12 @@ func measure(ctx context.Context, s audio.Decoder) (loudness, error) {
 	m := newLoudMeter(s.SampleRate(), s.Channels())
 	buf := make([]float32, 8192*s.Channels())
 	for n := 0; ; n++ {
-		if n%16 == 0 {
+		if n%4 == 0 {
 			if err := ctx.Err(); err != nil {
 				return loudness{}, err
+			}
+			if n > 0 {
+				runtime.Gosched()
 			}
 		}
 		k, err := s.Read(buf)

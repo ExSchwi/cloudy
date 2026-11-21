@@ -173,6 +173,32 @@ func isTLSError(err error) bool {
 		errors.As(err, &certInvalid) || errors.As(err, &recErr)
 }
 
+var (
+	origDefaultTransport = http.DefaultTransport
+	streamHTTPClient     = newStreamHTTPClient()
+)
+
+func newStreamHTTPClient() *http.Client {
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr := base.Clone()
+		tr.ReadBufferSize = 128 << 10
+		tr.ResponseHeaderTimeout = 15 * time.Second
+		tr.MaxIdleConnsPerHost = 8
+		return &http.Client{Transport: tr}
+	}
+	return http.DefaultClient
+}
+
+// streamClient returns a dedicated HTTP client for audio streams so cover art
+// and API calls do not contend for transport pools, while still honoring test
+// overrides of http.DefaultTransport.
+func streamClient() *http.Client {
+	if http.DefaultTransport != origDefaultTransport {
+		return http.DefaultClient
+	}
+	return streamHTTPClient
+}
+
 // fetch fetches the song from byte from on, for f.
 func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 	defer d.release()
@@ -244,7 +270,7 @@ func (d *download) fetch(ctx context.Context, f *fetcher, from int64) {
 			req.Header.Set("Range", "bytes="+strconv.FormatInt(at, 10)+"-")
 			want = http.StatusPartialContent
 		}
-		res, err := http.DefaultClient.Do(req)
+		res, err := streamClient().Do(req)
 		if err != nil {
 			if !httpFallback && at == 0 && strings.HasPrefix(reqURL, "https://") && ctx.Err() == nil && isTLSError(err) {
 				httpFallback = true
@@ -699,21 +725,59 @@ func (w *window) at(off int64, n int) []byte {
 	return w.b[off-w.off : min(int64(len(w.b)), off-w.off+int64(n))]
 }
 
-// rebufferBytes is the small cushion a starved playback reader accumulates
+// rebufferBytes is the default cushion a starved playback reader accumulates
 // after running dry so slow or bursty streams resume cleanly instead of
-// stuttering frame by frame, capped by rebufferMaxWait.
+// stuttering frame by frame, capped by rebufferMaxWait. High-bitrate streams
+// (such as 96 kHz / 24-bit FLAC) override these via rebufferSize/rebufferWait.
 const (
-	rebufferBytes   = 64 << 10
-	rebufferMaxWait = 500 * time.Millisecond
+	rebufferBytes        = 64 << 10
+	rebufferMaxWait      = 500 * time.Millisecond
+	initialBufferMaxWait = 800 * time.Millisecond
 )
+
+// prebuffer waits up to maxWait for want bytes from off on an active
+// top-level network download so playback starts with a real cushion instead
+// of a single byte. Completed/cached downloads and shared readers return at once.
+func (d *download) prebuffer(off, want int64, maxWait time.Duration) {
+	if d == nil || d.parent != nil || want <= 0 || maxWait <= 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.done || d.errContext() != nil {
+		return
+	}
+	if d.size > off {
+		want = min(want, d.size-off)
+	}
+	if d.avail(off) >= want {
+		return
+	}
+	timedOut, doneWait := false, false
+	timer := time.AfterFunc(maxWait, func() {
+		d.mu.Lock()
+		if !doneWait {
+			timedOut = true
+			d.cond.Broadcast()
+		}
+		d.mu.Unlock()
+	})
+	for d.avail(off) < want && !d.done && d.errContext() == nil && !timedOut {
+		d.cond.Wait()
+	}
+	doneWait = true
+	timer.Stop()
+}
 
 // A downloadReader reads a download from an offset, waiting for its bytes.
 // It is no io.Seeker, so go-mp3 does not read the whole file up front to
 // find where each frame starts.
 type downloadReader struct {
-	d        *download
-	pos      int64
-	rebuffer bool
+	d            *download
+	pos          int64
+	rebuffer     bool
+	rebufferSize int64         // 0 uses rebufferBytes
+	rebufferWait time.Duration // 0 uses rebufferMaxWait
 }
 
 func (r *downloadReader) Read(p []byte) (int, error) {
@@ -729,13 +793,20 @@ func (r *downloadReader) Read(p []byte) (int, error) {
 		d.cond.Wait()
 	}
 	if starved && r.rebuffer && r.d.parent == nil && !d.done && r.d.errContext() == nil {
-		want := int64(rebufferBytes)
+		want := r.rebufferSize
+		if want <= 0 {
+			want = rebufferBytes
+		}
+		waitCap := r.rebufferWait
+		if waitCap <= 0 {
+			waitCap = rebufferMaxWait
+		}
 		if d.size > r.pos {
 			want = min(want, d.size-r.pos)
 		}
 		if d.avail(r.pos) < want {
 			timedOut, doneWait := false, false
-			timer := time.AfterFunc(rebufferMaxWait, func() {
+			timer := time.AfterFunc(waitCap, func() {
 				d.mu.Lock()
 				if !doneWait {
 					timedOut = true
@@ -905,7 +976,9 @@ type mp3Stream struct {
 
 func openMP3Stream(dl *download, durationMs int64) (*mp3Stream, error) {
 	start := id3Size(dl)
-	dr := &downloadReader{d: dl, pos: start}
+	const mp3Buffer = 96 << 10
+	dl.prebuffer(start, mp3Buffer, initialBufferMaxWait)
+	dr := &downloadReader{d: dl, pos: start, rebufferSize: mp3Buffer, rebufferWait: 800 * time.Millisecond}
 	dec, err := gomp3.NewDecoder(bufio.NewReaderSize(dr, 64<<10))
 	if err != nil {
 		return nil, err
@@ -1005,7 +1078,7 @@ func (s *mp3Stream) SetPosition(frame int64) error {
 			off = findFrame(s.dl, off)
 		}
 	}
-	dr := &downloadReader{d: s.dl, pos: off}
+	dr := &downloadReader{d: s.dl, pos: off, rebufferSize: 96 << 10, rebufferWait: 800 * time.Millisecond}
 	dec, err := gomp3.NewDecoder(bufio.NewReaderSize(dr, 64<<10))
 	if err != nil {
 		return err
@@ -1185,6 +1258,18 @@ func (s *spectrum) at(frame int64) ([Bands]float32, bool) {
 	return s.chunks[c], true
 }
 
+// fftTwiddles precomputes the roots of unity for fftSize-point FFTs so the
+// visualizer hot path avoids repeated cmplx.Exp calls (~94 times/sec at 96 kHz).
+var fftTwiddles = func() [10][fftSize / 2]complex128 {
+	var t [10][fftSize / 2]complex128
+	for stage, size := 0, 2; size <= fftSize; stage, size = stage+1, size<<1 {
+		for k := range size / 2 {
+			t[stage][k] = cmplx.Exp(complex(0, -2*math.Pi*float64(k)/float64(size)))
+		}
+	}
+	return t
+}()
+
 // fft transforms x in place; len(x) is a power of two.
 func fft(x []complex128) {
 	n := len(x)
@@ -1197,6 +1282,19 @@ func fft(x []complex128) {
 		if i < j {
 			x[i], x[j] = x[j], x[i]
 		}
+	}
+	if n == fftSize {
+		for stage, size := 0, 2; size <= n; stage, size = stage+1, size<<1 {
+			half := size / 2
+			tw := &fftTwiddles[stage]
+			for start := 0; start < n; start += size {
+				for k := range half {
+					a, b := x[start+k], x[start+k+half]*tw[k]
+					x[start+k], x[start+k+half] = a+b, a-b
+				}
+			}
+		}
+		return
 	}
 	for size := 2; size <= n; size <<= 1 {
 		w := cmplx.Exp(complex(0, -2*math.Pi/float64(size)))

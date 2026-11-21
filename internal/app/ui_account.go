@@ -49,7 +49,14 @@ func (a *app) boot() {
 
 // signedIn shows what is personal to prof, or to nobody.
 func (a *app) signedIn(prof *netease.Profile) {
+	prev := a.profile
 	a.accountGen++
+	if a.accountGen > 1 && a.pl != nil && a.pl.Cache != nil {
+		changed := (prev == nil) != (prof == nil) || (prev != nil && prof != nil && prev.UserID != prof.UserID)
+		if changed {
+			go a.pl.Cache.ResetQualityHints()
+		}
+	}
 	for _, e := range a.likeEdits {
 		if e.timer != nil {
 			e.timer.Stop()

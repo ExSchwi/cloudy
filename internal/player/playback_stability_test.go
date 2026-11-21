@@ -2,12 +2,14 @@ package player
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -384,6 +386,180 @@ func TestDownloadRebufferWaitsAfterStarvation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("rebuffer did not wake after cushion filled")
+	}
+	dl.Close()
+}
+
+// When requesting "hires" resolves to a lower tier ("lossless" or "exhigh"),
+// the cache records the downgraded mapping so replays hit disk with zero
+// network calls, and ResetQualityHints clears those aliases on account switch.
+func TestCacheDowngradedQualityHitsOnReplay(t *testing.T) {
+	b, err := os.ReadFile("testdata/seek.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audioReqs atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		audioReqs.Add(1)
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+		w.Write(b)
+	}))
+	defer srv.Close()
+
+	c := NewCache(t.TempDir(), 1<<30)
+	dl := c.downloadFor(901, "hires", &netease.Stream{URL: srv.URL, Size: int64(len(b)), Level: "lossless", Type: "flac"})
+	// Wait for download + cache hand-off to complete.
+	dl.mu.Lock()
+	for !dl.done {
+		dl.cond.Wait()
+	}
+	dl.mu.Unlock()
+	dl.Close()
+
+	// Replay at "hires" must hit the cached lossless copy directly.
+	hit, st, ok := c.lookup(901, "hires")
+	if !ok || st.Level != "lossless" || hit.size != int64(len(b)) {
+		t.Fatalf("downgraded hires replay missed cache: ok=%v st=%+v", ok, st)
+	}
+	hit.Close()
+	if audioReqs.Load() != 1 {
+		t.Fatalf("expected 1 audio download, got %d", audioReqs.Load())
+	}
+
+	// Clearing quality hints makes "hires" re-check while "lossless" still hits.
+	c.ResetQualityHints()
+	if _, _, ok := c.lookup(901, "hires"); ok {
+		t.Fatal("hires still hit after ResetQualityHints")
+	}
+	if hit, _, ok := c.lookup(901, "lossless"); !ok {
+		t.Fatal("lossless missed after ResetQualityHints")
+	} else {
+		hit.Close()
+	}
+}
+
+// An existing pre-hint cached file (<id>-lossless.flac) is rescued immediately
+// when SongURL returns Level="lossless" for a "hires" request, downloading 0
+// audio bytes and making all subsequent "hires" plays 0-network cache hits.
+func TestOpenContextRescuesExistingCacheAfterDowngrade(t *testing.T) {
+	b, err := os.ReadFile("testdata/seek.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	c := NewCache(dir, 1<<30)
+	// Seed a legacy cached lossless file without maxRequested metadata.
+	f := c.part(&netease.Stream{Size: int64(len(b)), Level: "lossless", Type: "flac"})
+	f.Write(b)
+	f.Close()
+	path, ok := c.keep(902, &netease.Stream{Size: int64(len(b)), Level: "lossless", Type: "flac"}, f.Name(), int64(len(b)))
+	if !ok {
+		t.Fatal("failed to seed legacy cache file")
+	}
+	c.settled(path)
+
+	var audioHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		audioHits.Add(1)
+		w.Write(b)
+	}))
+	defer srv.Close()
+
+	var urlCalls atomic.Int32
+	oldSongURL := songURL
+	songURL = func(ctx context.Context, id int64, level string) (*netease.Stream, error) {
+		urlCalls.Add(1)
+		return &netease.Stream{URL: srv.URL, Size: int64(len(b)), Level: "lossless", Type: "flac"}, nil
+	}
+	t.Cleanup(func() { songURL = oldSongURL })
+
+	p := &Player{Cache: c}
+	tr := netease.Track{ID: 902, Duration: 3000}
+
+	// Play 1: songURL resolves hires -> lossless, rescued from disk with 0 HTTP audio requests.
+	st, s, err := p.openContext(context.Background(), tr, "hires")
+	if err != nil || st.Level != "lossless" {
+		t.Fatalf("play 1 failed: st=%+v err=%v", st, err)
+	}
+	s.Close()
+	if urlCalls.Load() != 1 || audioHits.Load() != 0 {
+		t.Fatalf("play 1 should rescue disk cache: urlCalls=%d audioHits=%d", urlCalls.Load(), audioHits.Load())
+	}
+
+	// Play 2: alias was persisted, so neither songURL nor HTTP audio is called.
+	st, s, err = p.openContext(context.Background(), tr, "hires")
+	if err != nil || st.Level != "lossless" {
+		t.Fatalf("play 2 failed: st=%+v err=%v", st, err)
+	}
+	s.Close()
+	if urlCalls.Load() != 1 || audioHits.Load() != 0 {
+		t.Fatalf("play 2 should hit disk directly: urlCalls=%d audioHits=%d", urlCalls.Load(), audioHits.Load())
+	}
+}
+
+// On Windows, renaming a .part over an open destination file fails; keepFor
+// reuses an identical-size destination file and still writes updated metadata.
+func TestCacheKeepReusesOpenDestination(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, 1<<20)
+	dest := filepath.Join(dir, "903-lossless.flac")
+	payload := bytes.Repeat([]byte("f"), 1024)
+	if err := os.WriteFile(dest, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Hold destination open (blocks os.Rename overwrite on Windows).
+	held, err := os.Open(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	part := filepath.Join(dir, "incoming.part")
+	if err := os.WriteFile(part, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gotPath, ok := c.keepFor(903, "hires", &netease.Stream{Level: "lossless", Type: "flac"}, part, int64(len(payload)))
+	if !ok || gotPath != dest {
+		t.Fatalf("keepFor failed with open destination: ok=%v path=%q", ok, gotPath)
+	}
+	c.settled(gotPath)
+	if hit, _, ok := c.lookup(903, "hires"); !ok {
+		t.Fatal("hires alias not saved when destination was held open")
+	} else {
+		hit.Close()
+	}
+}
+
+// prebuffer accumulates an initial cushion on active downloads and returns
+// immediately on completed downloads.
+func TestDownloadPrebufferWaitsForInitialCushion(t *testing.T) {
+	// Completed download returns immediately.
+	doneDL := downloaded(make([]byte, 1024))
+	start := time.Now()
+	doneDL.prebuffer(0, 256<<10, 500*time.Millisecond)
+	if time.Since(start) > 50*time.Millisecond {
+		t.Fatal("prebuffer waited on completed download")
+	}
+
+	// Active download waits until cushion arrives.
+	dl := &download{size: 256 << 10, cancel: func() {}, users: 1}
+	dl.cond.L = &dl.mu
+	done := make(chan struct{})
+	go func() {
+		dl.prebuffer(0, 128<<10, time.Second)
+		close(done)
+	}()
+	_ = dl.write(make([]byte, 32<<10))
+	select {
+	case <-done:
+		t.Fatal("prebuffer returned before cushion filled")
+	case <-time.After(30 * time.Millisecond):
+	}
+	_ = dl.write(make([]byte, 128<<10))
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("prebuffer did not wake after cushion filled")
 	}
 	dl.Close()
 }

@@ -703,9 +703,14 @@ func (p *Player) measureLater(gen int, s stream, durationMs int64, keys ...strin
 	loud := p.Loud
 	go func() {
 		defer cancel()
-		// Let playback fill its initial decode buffer before a second
-		// concurrent decoder starts reading the same download.
-		timer := time.NewTimer(1500 * time.Millisecond)
+		// Let playback fill its initial decode buffer (and, for active network
+		// streams, let the download get well ahead) before a second concurrent
+		// decoder starts reading the same download.
+		delay := 1500 * time.Millisecond
+		if dl.Progress() < 1 {
+			delay = 3 * time.Second
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
@@ -1102,7 +1107,21 @@ func (p *Player) openContext(ctx context.Context, t netease.Track, level string)
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	dl = p.Cache.download(t.ID, info)
+	// If NetEase downgraded the stream (e.g. "hires" -> "lossless") and that
+	// resolved level is already cached on disk, play from cache and record the
+	// alias instead of re-downloading the entire file.
+	if info.Level != "" && info.Level != level {
+		if dl, cached, ok := p.Cache.lookupExactAndAlias(t.ID, info.Level, level); ok {
+			s, err := openStream(dl, t.Duration)
+			if err == nil {
+				return cached, s, nil
+			}
+			path := dl.file.Name()
+			dl.Close()
+			p.Cache.remove(path)
+		}
+	}
+	dl = p.Cache.downloadFor(t.ID, level, info)
 	stop := context.AfterFunc(ctx, dl.Close)
 	s, err := openStream(dl, t.Duration)
 	if !stop() || ctx.Err() != nil {

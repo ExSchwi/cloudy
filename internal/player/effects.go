@@ -152,8 +152,10 @@ const vocalGain = 6
 // a quarter of what it would at the most, made up by up to
 // compressMakeup dB, so that quiet passages come up and loud ones down.
 const (
-	compressThreshold = -20.0 // dBFS
-	compressMakeup    = 8.0   // dB
+	compressThreshold    = -20.0 // dBFS
+	compressThresholdLin = 0.1   // 10^(compressThreshold/20)
+	compressMakeup       = 8.0   // dB
+	compressGainStep     = 16    // samples between gain-curve evaluations
 )
 
 // glideTime is how long effects chosen for a song take to come in.
@@ -185,6 +187,10 @@ type shaper struct {
 	state           [nFilters][2]biquadState
 	pre             float64 // the gain before, that leaves room for what is lifted
 	makeup          float64 // precomputed compressor makeup gain
+	compExp         float64 // precomputed 1/ratio - 1 for compressor gain curve
+	compGain        float64 // current interpolated compressor gain
+	compDelta       float64 // per-sample compressor gain step
+	compStep        int     // frames remaining until next gain evaluation
 	vocal           biquad  // the voice lifted, in the middle only
 	voice           biquadState
 	env             float64 // how loud the sound is now, for the compressor
@@ -235,6 +241,8 @@ func (s *shaper) tune(e Effects) {
 	// lifted, a little less, for music seldom fills every band at once.
 	s.pre = math.Pow(10, -most*0.8/20)
 	s.makeup = math.Pow(10, e.Loudness*compressMakeup/20)
+	s.compExp = 1/(1+3*e.Loudness) - 1
+	s.compStep = 0
 	if e.Room != s.roomID {
 		s.roomID, s.room = e.Room, nil
 		if r := roomOf(e.Room); r != nil {
@@ -356,12 +364,22 @@ func (s *shaper) sample(l, r float64) (float32, float32) {
 		} else {
 			s.env += s.release * (level - s.env)
 		}
-		g := s.makeup
-		if db := 20 * math.Log10(s.env+1e-9); db > compressThreshold {
-			ratio := 1 + 3*e.Loudness
-			g *= math.Pow(10, (db-compressThreshold)*(1/ratio-1)/20)
+		if s.compStep == 0 {
+			target := s.makeup
+			if s.env > compressThresholdLin {
+				target *= math.Pow(s.env/compressThresholdLin, s.compExp)
+			}
+			if s.compGain == 0 {
+				s.compGain = target
+				s.compDelta = 0
+			} else {
+				s.compDelta = (target - s.compGain) / compressGainStep
+			}
+			s.compStep = compressGainStep
 		}
-		l, r = l*g, r*g
+		s.compGain += s.compDelta
+		s.compStep--
+		l, r = l*s.compGain, r*s.compGain
 	}
 	return float32(soften(l)), float32(soften(r))
 }
@@ -383,6 +401,7 @@ func (s *shaper) SetPosition(frame int64) error {
 	// The filters' memory is of the sound before: none of it carries over.
 	s.state = [nFilters][2]biquadState{}
 	s.voice, s.env = biquadState{}, 0
+	s.compGain, s.compDelta, s.compStep = 0, 0, 0
 	for _, d := range s.delay {
 		clear(d)
 	}

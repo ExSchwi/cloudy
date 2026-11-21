@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/mewkiz/flac"
 	"github.com/mewkiz/flac/frame"
@@ -45,9 +46,33 @@ func openFLACStream(dl *download) (*flacStream, error) {
 	if s.info.NChannels == 0 || s.info.SampleRate == 0 {
 		return nil, errors.New("flac: no stream info")
 	}
+	bufTarget := flacBufferTarget(dl, info, start)
+	dl.prebuffer(start, bufTarget, initialBufferMaxWait)
 	s.spec = newSpectrum(int(s.info.SampleRate), int64(s.info.NSamples))
-	s.r = bufio.NewReaderSize(&downloadReader{d: dl, pos: start, rebuffer: dl.parent == nil}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{
+		d:            dl,
+		pos:          start,
+		rebuffer:     dl.parent == nil,
+		rebufferSize: bufTarget,
+		rebufferWait: 1200 * time.Millisecond,
+	}, 128<<10)
 	return s, nil
+}
+
+// flacBufferTarget estimates ~1 second of compressed FLAC audio (clamped to
+// 128 KB..512 KB) so both CD-quality and 96 kHz/24-bit Hi-Res FLAC streams
+// start and recover from stalls with a proportional cushion.
+func flacBufferTarget(dl *download, info *meta.StreamInfo, start int64) int64 {
+	var bps int64
+	if total := dl.totalSize(); total > start && info.NSamples > 0 && info.SampleRate > 0 {
+		bps = (total - start) * int64(info.SampleRate) / int64(info.NSamples)
+	}
+	if bps <= 0 {
+		bytesPerSample := max(int64(info.BitsPerSample+7)/8, 2)
+		ch := max(int64(info.NChannels), 2)
+		bps = int64(info.SampleRate) * bytesPerSample * ch * 65 / 100
+	}
+	return min(max(bps, 128<<10), 512<<10)
 }
 
 // flacStreamInfo parses only the mandatory 34-byte STREAMINFO block at from,
@@ -205,7 +230,13 @@ func (s *flacStream) SetPosition(target int64) error {
 			loOff, lo = off, at
 		}
 	}
-	s.r = bufio.NewReaderSize(&downloadReader{d: s.dl, pos: loOff, rebuffer: s.dl.parent == nil}, 64<<10)
+	s.r = bufio.NewReaderSize(&downloadReader{
+		d:            s.dl,
+		pos:          loOff,
+		rebuffer:     s.dl.parent == nil,
+		rebufferSize: flacBufferTarget(s.dl, s.info, s.start),
+		rebufferWait: 1200 * time.Millisecond,
+	}, 128<<10)
 	s.pos, s.skip, s.pend = target, target-lo, s.pend[:0]
 	return nil
 }
