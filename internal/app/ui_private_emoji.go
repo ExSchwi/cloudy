@@ -28,9 +28,12 @@ func privateEmojiGlyph(c *ui.Context, glyph string, size float32) {
 
 func (a *app) privateEmojiGrid(c *ui.Context, chat *privateChat, ink paneInk) {
 	glyphs, key := privateEmojiGlyphs, "emoji-list"
-	small := a.dm.stickers.smallEmoji
+	small, classic := a.dm.stickers.smallEmoji, a.dm.stickers.classic
 	if small {
 		glyphs, key = privateSmallEmojiMarkers, "small-emoji-list"
+	} else if classic {
+		glyphs, key = privateClassicEmojiMarkers, "classic-emoji-list"
+		small = true
 	}
 	ui.Scroll(c.Key(key)).Grow(1).MinHeight(0).Gap(3).Children(func() {
 		for row := range slices.Chunk(glyphs, 7) {
@@ -55,7 +58,11 @@ func (a *app) privateEmojiGrid(c *ui.Context, chat *privateChat, ink paneInk) {
 						if !small {
 							privateEmojiGlyph(c, glyph, 24)
 						} else if bmp := a.privateSmallEmojiBitmap(glyph); bmp != nil {
-							ui.Image(c, bmp).Size(28, 28).Fit(ui.Contain)
+							size := float32(28)
+							if classic {
+								size = 22 // NetEase serves these at 21 pixels
+							}
+							ui.Image(c, bmp).Size(size, size).Fit(ui.Contain)
 						}
 					})
 					if open {

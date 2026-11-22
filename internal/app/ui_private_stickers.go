@@ -25,7 +25,7 @@ type privateStickerPicker struct {
 	page                        netease.PrivateStickerPage
 	pageGroup                   string // The group on screen can lag behind the requested group.
 	scroll                      ui.ScrollState
-	emoji, smallEmoji           bool
+	emoji, smallEmoji, classic  bool
 	emojiCaret                  *int
 }
 
@@ -43,6 +43,9 @@ func privateStickerGroupName(group netease.PrivateStickerGroup) string {
 func (p *privateStickerPicker) title() string {
 	if p.smallEmoji {
 		return privateSmallEmojiTitle
+	}
+	if p.classic {
+		return privateClassicEmojiTitle
 	}
 	if p.emoji {
 		return "Emoji"
@@ -84,7 +87,7 @@ func (a *app) privateStickerButton(c *ui.Context, chat *privateChat, ink paneInk
 		title := p.title()
 		ui.Text(c.Key("sticker-title"), title).FontSize(16).FontWeight(600).Shrink(0).
 			SingleLine().Label("表情分组：" + title)
-		if p.emoji || p.smallEmoji {
+		if p.emoji || p.smallEmoji || p.classic {
 			a.privateEmojiGrid(c, chat, ink)
 			a.privateStickerTabs(c, ink)
 			return
@@ -213,7 +216,7 @@ func (a *app) privateStickerTabs(c *ui.Context, ink paneInk) {
 			}
 		}
 		tab := tabButton(id, name, hint)
-		tabContent(tab, !p.emoji && !p.smallEmoji && id == p.group, func() {
+		tabContent(tab, !p.emoji && !p.smallEmoji && !p.classic && id == p.group, func() {
 			if favorites {
 				ui.Icon(c, iconHeart).Size(22, 22).TextColor(ink.text)
 			} else if bmp != nil {
@@ -224,7 +227,7 @@ func (a *app) privateStickerTabs(c *ui.Context, ink paneInk) {
 		})
 		if p.open {
 			tab.OnClick(func() {
-				p.emoji, p.smallEmoji = false, false
+				p.emoji, p.smallEmoji, p.classic = false, false, false
 				if p.group != id {
 					a.selectPrivateStickerGroup(id)
 				}
@@ -235,7 +238,7 @@ func (a *app) privateStickerTabs(c *ui.Context, ink paneInk) {
 		emoji := tabButton("local-emoji", "Emoji 分类", "Emoji")
 		tabContent(emoji, p.emoji, func() { ui.Icon(c, iconPrivateSmile).Size(22, 22).TextColor(ink.text) })
 		if p.open {
-			emoji.OnClick(func() { p.emoji, p.smallEmoji = true, false })
+			emoji.OnClick(func() { p.emoji, p.smallEmoji, p.classic = true, false, false })
 		}
 		for _, group := range p.groups {
 			if privateFavoriteStickerGroup(group.ID.String()) {
@@ -258,7 +261,21 @@ func (a *app) privateStickerTabs(c *ui.Context, ink paneInk) {
 			}
 		})
 		if p.open {
-			small.OnClick(func() { p.emoji, p.smallEmoji = false, true })
+			small.OnClick(func() { p.emoji, p.smallEmoji, p.classic = false, true, false })
+		}
+		classic := tabButton("local-classic-emoji", privateClassicEmojiTitle, privateClassicEmojiTitle)
+		tabContent(classic, p.classic, func() {
+			marker := privateClassicEmojiMarkers[0]
+			// Only a picture already loaded: the tab alone never asks for one.
+			bmp := bitmap(a.art.peek(privateSmallEmojiURLs[marker]))
+			if bmp != nil {
+				ui.Image(c, bmp).Size(21, 21).Fit(ui.Contain)
+			} else {
+				ui.Text(c, "经典").FontSize(11).FontWeight(600).SingleLine()
+			}
+		})
+		if p.open {
+			classic.OnClick(func() { p.emoji, p.smallEmoji, p.classic = false, false, true })
 		}
 		for _, group := range p.groups {
 			if !privateFavoriteStickerGroup(group.ID.String()) {
@@ -266,7 +283,7 @@ func (a *app) privateStickerTabs(c *ui.Context, ink paneInk) {
 			}
 		}
 	}
-	if (len(p.groups)+2)*size+(len(p.groups)+1)*gap <= width {
+	if (len(p.groups)+3)*size+(len(p.groups)+2)*gap <= width {
 		ui.Row(c.Key("sticker-groups")).Height(size).Shrink(0).Gap(gap).Justify(ui.Start).Children(tabs)
 	} else {
 		ui.ScrollHorizontal(c.Key("sticker-groups")).Height(size).Shrink(0).Gap(gap).Justify(ui.Start).Children(tabs)
