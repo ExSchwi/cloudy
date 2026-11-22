@@ -264,7 +264,7 @@ func (a *app) loginDialog(c *ui.Context) {
 						ui.Text(c, l.scanner).FontSize(14).FontWeight(600).TextColor(ui.Hex("#1d1d1f"))
 					}
 				case l.status == netease.QRExpired || l.err != "":
-					if pillButton(c.Key("refresh"), iconRepeat, "刷新二维码", p.accent, p.onAccent).Clicked() {
+					if pillButton(c.Key("refresh"), iconRefresh, "刷新二维码", p.accent, p.onAccent).Clicked() {
 						a.openLogin()
 					}
 				}

@@ -57,7 +57,7 @@ func (a *app) privateStickerGroupsAnswered(account, epoch int, groups []netease.
 	}
 	p.groups, p.groupsLoaded = groups, true
 	if p.open && p.group == "" && len(groups) != 0 {
-		a.selectPrivateStickerGroup(groups[0].ID.String())
+		a.selectPrivateStickerGroup(p.firstGroup())
 	}
 	a.preloadNextPrivateStickerPage()
 }
@@ -96,10 +96,26 @@ func (a *app) preloadNextPrivateStickerPage() {
 }
 
 func (p *privateStickerPicker) stickerWarmGroup() string {
-	if p.group == "" && len(p.groups) != 0 {
-		return p.groups[0].ID.String()
+	if p.group == "" {
+		return p.firstGroup()
 	}
 	return p.group
+}
+
+// firstGroup is the pack the picker opens on: the first one, unless its
+// first page came back empty and complete, as the favorites do for a
+// listener who has saved none.
+func (p *privateStickerPicker) firstGroup() string {
+	for _, group := range p.groups {
+		id := group.ID.String()
+		if page, ok := p.pages[id]; !ok || len(page.Items) > 0 || page.Cursor != "" {
+			return id
+		}
+	}
+	if len(p.groups) != 0 {
+		return p.groups[0].ID.String()
+	}
+	return ""
 }
 
 func (a *app) selectPrivateStickerGroup(id string) {

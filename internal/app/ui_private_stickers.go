@@ -64,7 +64,7 @@ func (a *app) privateStickerButton(c *ui.Context, chat *privateChat, ink paneInk
 			return
 		}
 		if p.group == "" && len(p.groups) != 0 {
-			a.selectPrivateStickerGroup(p.groups[0].ID.String())
+			a.selectPrivateStickerGroup(p.firstGroup())
 		}
 	})
 	const key = "dm-sticker-picker"

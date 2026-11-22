@@ -62,12 +62,12 @@ func (a *app) privateMessagesPanel(c *ui.Context) {
 func (a *app) privateContacts(c *ui.Context, width float32) {
 	d := &a.dm
 	ink := a.inkOn(false)
-	ui.Column(c.Key("dm-contacts")).Width(width).Shrink(0).Padding(2, 12, 16, 22).Gap(8).Children(func() {
-		ui.Row(c).Height(36).PaddingX(12).Gap(8).Radius(999).AlignItems(ui.Center).Background(ink.hover).Border(0.5, ink.line).Children(func() {
+	ui.Column(c.Key("dm-contacts")).Width(width).Shrink(0).Padding(2, 4, 16, 22).Gap(8).Children(func() {
+		ui.Row(c).Height(36).Margin(0, 10, 0, 0).PaddingX(12).Gap(8).Radius(999).AlignItems(ui.Center).Background(ink.hover).Border(0.5, ink.line).Children(func() {
 			ui.Icon(c, iconSearch).Size(15, 15).TextColor(ink.muted)
 			ui.TextInputBase(c.Key("dm-query"), &d.query).Bind(&d.searchBox).Grow(1).MinWidth(0).FontSize(13).Label("搜索会话").Placeholder("搜索会话")
 		})
-		ui.Scroll(c.Key("dm-contact-list")).TrackScroll(&d.listScroll).Grow(1).MinHeight(0).Gap(4).Children(func() {
+		ui.Scroll(c.Key("dm-contact-list")).TrackScroll(&d.listScroll).Grow(1).MinHeight(0).Padding(0, 10, 0, 0).Gap(4).Children(func() {
 			query := strings.ToLower(strings.TrimSpace(d.query))
 			viewport := d.listScroll.Bounds(c)
 			// Elements stay local to this build, never in persistent app state.
@@ -218,7 +218,7 @@ func (a *app) privateChatContent(c *ui.Context, chat *privateChat) {
 			a.closePrivateMessages()
 			a.open(route{page: pageUser, id: id})
 		}
-		refresh := iconButton(c.Key("dm-refresh-history"), iconRepeat, 14, ink.muted, "刷新消息").Disabled(chat.loading)
+		refresh := iconButton(c.Key("dm-refresh-history"), iconRefresh, 15, ink.muted, "刷新消息").Disabled(chat.loading)
 		if chat.err != "" {
 			refresh.Tooltip(chat.err)
 		}
