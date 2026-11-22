@@ -123,7 +123,7 @@ func decodeAPNGSticker(data, control []byte) (*artwork, error) {
 	if frameCount <= 0 {
 		return nil, invalid
 	}
-	if uint64(config.Width)*uint64(config.Height)*4 > artLimit/2 {
+	if uint64(config.Width)*uint64(config.Height)*4 > webpAnimationBytes {
 		return nil, png.UnsupportedError("APNG canvas exceeds sticker budget")
 	}
 	if frameCount > 1 && stickerFrameCount(bounds, frameCount) == 1 {

@@ -65,7 +65,7 @@ func (a *stickerAnimation) artwork(bounds image.Rectangle) *artwork {
 func stickerFrameCount(bounds image.Rectangle, frames int) int {
 	// Share the existing artwork budget. A single oversized animation
 	// keeps its first frame instead of evicting the entire cache.
-	if int64(bounds.Dx())*int64(bounds.Dy())*4*int64(frames) > artLimit/2 {
+	if int64(bounds.Dx())*int64(bounds.Dy())*4*int64(frames) > webpAnimationBytes {
 		return 1
 	}
 	return frames

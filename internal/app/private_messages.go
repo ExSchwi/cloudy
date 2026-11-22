@@ -73,6 +73,12 @@ type privateMessagesState struct {
 	retryAt                     time.Time
 	failures                    int
 	rateLimits                  int
+	// shown is whether the panel was built: once its exit ends, what it
+	// held is given back (releaseSoon).
+	shown bool
+	// stickerArt is the cover cache keys of the stickers shown, let go of
+	// as the panel goes.
+	stickerArt map[string]bool
 }
 
 func (a *app) resetPrivateMessages() {

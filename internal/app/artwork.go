@@ -91,6 +91,18 @@ func (c *artCache) add(key string, a *artwork) {
 	}
 }
 
+// letGo stops keeping the covers at keys, as the view that asked for them
+// goes: they stay found only while something else still holds them.
+func (c *artCache) letGo(keys map[string]bool) {
+	for key := range keys {
+		if a, ok := c.art[key]; ok {
+			delete(c.art, key)
+			c.size -= a.size
+			c.gone[key] = weak.Make(a)
+		}
+	}
+}
+
 // peek returns the cover at url if it is here, without asking for it.
 func (c *artCache) peek(url string) *artwork {
 	if a, ok := c.art[url]; ok {

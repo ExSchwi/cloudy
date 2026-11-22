@@ -310,12 +310,26 @@ func (a *app) privateStickerTabBitmap(id string) (*ui.Bitmap, string) {
 
 func (a *app) privateStickerArtwork(sticker netease.PrivateSticker, animate bool) (*artwork, string) {
 	src := sticker.URL
-	art := a.art.getSticker(src, animate)
+	art := a.privateStickerGet(src, animate)
 	if art != nil && art.failed && sticker.AlternateURL != "" {
 		src = sticker.AlternateURL
-		art = a.art.getSticker(src, animate)
+		art = a.privateStickerGet(src, animate)
 	}
 	return art, src
+}
+
+// privateStickerGet asks the cover cache for a sticker and notes it, so
+// that closing the messages lets go of every sticker they loaded.
+func (a *app) privateStickerGet(src string, animate bool) *artwork {
+	key := src
+	if animate {
+		key += "#sticker" // as getArtwork keys it
+	}
+	if a.dm.stickerArt == nil {
+		a.dm.stickerArt = map[string]bool{}
+	}
+	a.dm.stickerArt[key] = true
+	return a.art.getSticker(src, animate)
 }
 
 // Return the same official image URL the picker is showing.

@@ -56,6 +56,16 @@ func (a *app) privateMessagesPanel(c *ui.Context) {
 	})
 	if !mounted {
 		*p = privatePresentation{}
+		if d.shown {
+			// Its rows, stickers and avatars are garbage now, which an idle app
+			// would keep for minutes, their textures with them.
+			d.shown = false
+			a.art.letGo(d.stickerArt)
+			d.stickerArt = nil
+			a.releaseSoon()
+		}
+	} else {
+		d.shown = true
 	}
 }
 

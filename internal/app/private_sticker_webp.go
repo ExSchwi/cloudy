@@ -12,10 +12,12 @@ import (
 )
 
 const (
-	stickerInputLimit  = 16 << 20
-	webpCanvasLimit    = 4096
-	webpFrameLimit     = 512
-	webpAnimationBytes = artLimit / 2
+	stickerInputLimit = 16 << 20
+	webpCanvasLimit   = 4096
+	webpFrameLimit    = 512
+	// An animation keeps all its frames: one over a quarter of the cover
+	// cache shows its first frame only.
+	webpAnimationBytes = artLimit / 4
 )
 
 var (
