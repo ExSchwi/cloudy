@@ -86,6 +86,14 @@ func decodeStickerArt(data []byte) (*artwork, error) {
 }
 
 func decodeGIFSticker(data []byte) (*artwork, error) {
+	// DecodeAll keeps every frame: check the canvas before decoding any.
+	cfg, err := gif.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if !webpCanvasFits(cfg.Width, cfg.Height) {
+		return nil, errWebPCanvasBudget
+	}
 	decoded, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
