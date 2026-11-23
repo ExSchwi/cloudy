@@ -102,7 +102,7 @@ func (a *app) settingsPanel(c *ui.Context) {
 	ink := a.inkOn(false)
 	a.dialog(c, "settings", 0.3, &a.settingsView.open, func(panel ui.Element) {
 		// It grows from the corner of who listens, whose row opens it.
-		panel.Width(min(940, w-48)).Height(max(h-72, 320)).TextColor(ink.text).Label("设置").TransformOrigin(0, 1)
+		panel.Width(min(940, w-48)).Height(max(h-72, 320)).TextColor(ink.text).Label("设置")
 		a.pane(panel, 26, false)
 		panel.Children(func() {
 			a.scalingBody(c, func() {
@@ -270,6 +270,17 @@ type settingRow struct {
 	badge       string // a word on a capsule beside its label, as 未开放
 	sub         bool   // it belongs to the row above it
 	keep        bool   // its desc says how things stand: shown whatever the kit
+	opens       *rowOpens
+}
+
+// rowOpens is a row that opens what is under it, all of it a button, as
+// a disclosure's row in System Settings: its chevron turns as it opens.
+type rowOpens struct {
+	key, name string // name is what it is called, as 管理台历内容
+	open      bool
+	toggle    func()
+	hovered   bool     // whether the pointer is over it
+	lit       ui.Color // its light under the pointer
 }
 
 func (k *settingsKit) match(texts ...string) bool {
@@ -392,8 +403,10 @@ func (k *settingsKit) rowOf(r settingRow, control func()) {
 		k.plainRow(r, first, control)
 		return
 	}
-	ui.Row(c).Padding(11, 20, 11, left).Gap(20).AlignItems(ui.Center).MinHeight(62).
+	row := k.rowOpening(r.opens)
+	row.Padding(11, 20, 11, left).Gap(20).AlignItems(ui.Center).MinHeight(62).
 		Draw(func(p *ui.Painter, b ui.Rect) {
+			rowLit(p, b, r.opens)
 			if !first {
 				p.Fill(ui.Rect{X: b.X + 20, Y: b.Y, W: b.W - 40, H: 1}, line, 0)
 			}
@@ -437,8 +450,10 @@ func (k *settingsKit) plainRow(r settingRow, first bool, control func()) {
 	c, ink := k.c, k.ink
 	line := ink.line.Alpha(0.75)
 	said := r.desc != "" && (r.warn || r.keep || k.searching)
-	ui.Row(c).Padding(6, 14, 6, 16).Gap(16).AlignItems(ui.Center).MinHeight(46).
+	row := k.rowOpening(r.opens)
+	row.Padding(6, 14, 6, 16).Gap(16).AlignItems(ui.Center).MinHeight(46).
 		Draw(func(p *ui.Painter, b ui.Rect) {
+			rowLit(p, b, r.opens)
 			if !first {
 				p.Fill(ui.Rect{X: b.X + 16, Y: b.Y, W: b.W - 16, H: 1}, line, 0)
 			}
@@ -499,7 +514,11 @@ func (k *settingsKit) block(words string, fn func()) {
 // button is a button of the settings: a capsule as the app's others are,
 // red when it deletes what it names.
 func (k *settingsKit) button(key any, label string, icon *ui.SVG, disabled, danger bool) ui.Element {
-	return settingButton(k.c.Key(key), k.ink, label, icon, disabled, danger)
+	b := settingButton(k.c.Key(key), k.ink, label, icon, disabled, danger)
+	if b.Clicked() {
+		k.a.pressedFrom(b, 14) // what it opens flies out of it
+	}
+	return b
 }
 
 func settingButton(c *ui.Context, ink paneInk, label string, icon *ui.SVG, disabled, danger bool) ui.Element {
@@ -512,7 +531,7 @@ func settingButton(c *ui.Context, ink paneInk, label string, icon *ui.SVG, disab
 	if b.Hovered() && !disabled {
 		bg = ink.press
 	}
-	b.Background(b.AnimateColor("bg", bg, ui.Animation{Duration: 120 * time.Millisecond})).Border(0.5, ink.line).TextColor(fg)
+	b.Background(b.AnimateColor("bg", bg, motionHover)).Border(0.5, ink.line).TextColor(fg)
 	if disabled {
 		b.Opacity(0.45)
 	}
@@ -567,10 +586,29 @@ func (a *app) settingsBody(c *ui.Context) {
 	// Keep settings text on the final target. An edge Effect resamples the
 	// entire viewport, softening even the text well outside its fade band.
 	viewport.Children(func() {
-		ui.Scroll(c.Key(key)).Label(label+"设置项").TrackScroll(scroll).Fill().Padding(4, 30, 12, 26).Children(func() {
+		page := ui.Scroll(c.Key(key)).Label(label+"设置项").TrackScroll(scroll).Fill().Padding(4, 30, 12, 26)
+		if a.motion != motionOff {
+			// The category before goes at once, nearly: the next comes in
+			// over where it was.
+			page.Transition(ui.ElementTransition{Animation: &settingsLeave, Exit: &ui.Motion{}})
+		}
+		// Not as the settings open: they come in whole.
+		swap := a.motion != motionOff && !a.dialogScaling
+		if swap {
+			// The scroll only fades, its clip where it is: moved, a clip
+			// is drawn on the CPU, and the whole page with it.
+			a.enterAfterPaint(page, ui.Pose{Fade: 1}, motionSwap)
+		}
+		page.Children(func() {
 			if k.query == "" {
 				cat := settingsCategories[a.settingsView.tab]
-				ui.Column(c.Key(a.settingsView.tab)).Children(func() {
+				col := ui.Column(c.Key(a.settingsView.tab))
+				if swap {
+					// What it holds rises, only moved: a move the renderer
+					// folds into where it draws.
+					a.enterAfterPaint(col, ui.Pose{Y: 8}, motionSwap)
+				}
+				col.Children(func() {
 					ui.Text(c, cat.label).FontSize(26).FontWeight(700).Margin(0, 40, 0, 4)
 					ui.Text(c, cat.blurb).FontSize(13).TextColor(k.ink.muted).Margin(6, 40, 0, 4)
 					a.settingsPage(k, a.settingsView.tab)
@@ -654,7 +692,8 @@ func (a *app) settingsAccountPage(k *settingsKit) {
 					ui.Text(c, prof.Nickname).FontSize(16).FontWeight(700).SingleLine()
 					ui.Text(c, "已登录网易云音乐").FontSize(12.5).TextColor(ink.muted)
 				})
-				if k.button("logout", "退出登录", iconSignOut, false, true).Clicked() {
+				if b := k.button("logout", "退出登录", iconSignOut, false, true); b.Clicked() {
+					a.growFrom("sign-out", b, 14)
 					a.askSignOut()
 				}
 			})
@@ -725,7 +764,8 @@ func (a *app) settingsPlaybackPage(k *settingsKit) {
 			desc = "当前：" + a.presetLabel()
 		}
 		k.stateRow("音效", desc, func() {
-			if k.button("effects-open", "调节…", nil, false, false).Clicked() {
+			if b := k.button("effects-open", "调节…", nil, false, false); b.Clicked() {
+				a.growFrom("effects", b, 14)
 				a.openEffects()
 			}
 			if settingSwitch(c.Key("effects-on"), &s.Effects.On).Label("开启音效").Changed() {
@@ -815,6 +855,8 @@ func (a *app) settingsThemeGroup(k *settingsKit) {
 				}
 			})
 			if wheel.Clicked() {
+				r := wheel.Bounds()
+				a.growFromRect("accent", r, r.H/2) // the picker flies out of the wheel
 				draft := base.accent
 				if hex := a.chosenAccent(); hex != "" {
 					draft = ui.Hex(hex)
@@ -975,7 +1017,8 @@ func (a *app) settingsSystemPage(k *settingsKit) {
 			keys = fmt.Sprintf("有 %d 组被其他软件占用", a.keys.taken)
 		}
 		k.stateRow("全局快捷键", keys, func() {
-			if k.button("shortcut-custom", "自定义", nil, false, false).Clicked() {
+			if b := k.button("shortcut-custom", "自定义", nil, false, false); b.Clicked() {
+				a.growFrom("shortcut-editor", b, 14)
 				a.openShortcutEditor()
 			}
 			k.toggle("global-keys", "全局快捷键", &s.GlobalKeys, false, a.applyGlobalKeys)
@@ -1045,6 +1088,22 @@ func (a *app) settingsAboutPage(k *settingsKit) {
 			// which find what it installs.
 			k.sub("自动安装更新", "后台发现新版本时直接装好，下次打开软件时生效；手动检查仍会先问你", s.UpdateChecks, func() {
 				k.toggle("update-downloads", "自动安装更新", &s.UpdateInstall, false, nil)
+			})
+			k.row("下载源", "自动：先连 GitHub，连不上再换镜像源；也可以固定用其中一个。无论从哪里下载，都会校验签名", func() {
+				sources := updateSources()
+				labels := make([]string, len(sources))
+				chosen := sources[0].label
+				for i, src := range sources {
+					labels[i] = src.label
+					if src.source == s.UpdateSource {
+						chosen = src.label
+					}
+				}
+				k.choose("update-source", "下载源", chosen, labels, func(i int) {
+					s.UpdateSource = sources[i].source
+					a.applyUpdateSource()
+					a.changed()
+				})
 			})
 			k.stateRow("当前版本 "+mygo.App.Version(), "新版本来自 GitHub 的 nya-owo/cloudy", func() {
 				if k.button("check-updates", "检查更新", nil, false, false).Clicked() {

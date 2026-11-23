@@ -601,15 +601,11 @@ func (a *app) deckSettings(k *settingsKit) {
 	c := k.c
 	k.group("首页台历", func() {
 		open := a.deckDrawer
-		k.row("台历内容", a.deckSummary(), func() {
-			label := "管理"
-			if open {
-				label = "收起"
-			}
-			if k.disclosure("deck-manage", label+"台历内容", open).Clicked() {
-				a.deckDrawer = !open
-			}
-		})
+		label := "管理"
+		if open {
+			label = "收起"
+		}
+		k.opens("deck-manage", label+"台历内容", "台历内容", a.deckSummary(), open, func() { a.deckDrawer = !open })
 		if k.probe {
 			return
 		}
@@ -672,7 +668,7 @@ func (a *app) fmModeRow(c *ui.Context) {
 				case b.Hovered():
 					fill = white.Alpha(0.14)
 				}
-				b.Background(b.AnimateColor("bg", fill, ui.Animation{Duration: 140 * time.Millisecond}))
+				b.Background(b.AnimateColor("bg", fill, motionHover))
 				ink := white.Alpha(0.85)
 				if on {
 					ink = ui.Hex("#1d1d1f")
