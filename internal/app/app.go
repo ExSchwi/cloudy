@@ -241,7 +241,6 @@ type app struct {
 	headAt                ui.Rect          // where the cover of the page's header is
 	cameFrom              cardOrigin       // the card this page was opened from
 	restoreY              float32          // how far to scroll the page coming back
-	fontsAsked            bool             // the fonts that come as files were asked for
 	plView                plView           // how the playlist open is searched and sorted
 	headGone              float32          // how far the page's header has scrolled away
 	rowsRoute             route            // the page whose list last came in
