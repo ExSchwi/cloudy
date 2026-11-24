@@ -236,6 +236,17 @@ func TestArtCacheSweepsGone(t *testing.T) {
 	}
 }
 
+// A page left kept its songs alive through shownTracks, which shares the
+// list the page cache holds.
+func TestPageChangeDropsShownTracks(t *testing.T) {
+	a := newTestApp()
+	a.shownTracks = []netease.Track{{ID: 1, Name: "song"}}
+	a.open(route{page: pageRecent})
+	if a.shownTracks != nil {
+		t.Fatal("the page left kept its songs")
+	}
+}
+
 // visit shows r as show does, without loading what it shows.
 func visit(a *app, r route) {
 	a.route = r
