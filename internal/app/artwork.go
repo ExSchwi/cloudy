@@ -49,6 +49,8 @@ type artCache struct {
 	now   func() time.Time
 	size  int // the bytes the covers in art keep
 	limit int
+	// adds counts the covers put in, for sweepGone to look now and then.
+	adds int
 }
 
 // artLimit is how many bytes of covers the cache keeps. A cover keeps its
@@ -66,6 +68,11 @@ func newArtCache(post func(func())) *artCache {
 // covers take more than the limit, down to three quarters of it, so that
 // it sorts them seldom. Those showing were asked for last, and stay.
 func (c *artCache) add(key string, a *artwork) {
+	// The covers let go of are swept now and then, not only once the cache
+	// is over its limit: browsing for hours leaves thousands of them.
+	if c.adds++; c.adds%32 == 0 {
+		c.sweepGone()
+	}
 	if old, ok := c.art[key]; ok {
 		c.size -= old.size
 	}
@@ -80,11 +87,7 @@ func (c *artCache) add(key string, a *artwork) {
 // trim drops the covers asked for least recently until those kept take
 // no more than target bytes.
 func (c *artCache) trim(target int) {
-	for key, p := range c.gone {
-		if p.Value() == nil {
-			delete(c.gone, key)
-		}
-	}
+	c.sweepGone()
 	keys := make([]string, 0, len(c.art))
 	for key := range c.art {
 		keys = append(keys, key)
@@ -98,6 +101,15 @@ func (c *artCache) trim(target int) {
 		delete(c.art, key)
 		c.size -= a.size
 		c.gone[key] = weak.Make(a)
+	}
+}
+
+// sweepGone drops the covers let go of that nothing holds any more.
+func (c *artCache) sweepGone() {
+	for key, p := range c.gone {
+		if p.Value() == nil {
+			delete(c.gone, key)
+		}
 	}
 }
 
